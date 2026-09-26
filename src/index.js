@@ -273,6 +273,33 @@ client.once("ready", async () => {
 async function handleCommand(interaction) {
   {
     try {
+    // Typed commands are matched FIRST, and deliberately so. A typed `meet`
+    // carries the same commandName as the slash /meet, so if the /meet branch
+    // were checked first it would swallow it and hand out a random pooled
+    // link — exactly the behaviour typed `meet` must never have. Handling the
+    // text path up front also keeps `meet2`-`meet4` from falling through.
+    //
+    // Only falls through when the typed word isn't a meet, because typed
+    // `rand` continues on to its own branch.
+    if (interaction.isTextCommand) {
+      const name = interaction.commandName ?? "";
+      // Matched on the word, not merely "is it text": a typed `rand` is also
+      // a text command, and it must fall through to its own random branch.
+      const slot = /^meet(?:([2-9]|[1-9][0-9]+))?$/.exec(name);
+      if (slot) {
+        const code = PRELOADED_MEETS[slot[1] ?? "1"];
+        if (!code) return;
+
+        // No join watch here on purpose. These spaces belong to a different
+        // Google account than the one in .env, so every read comes back 403
+        // PERMISSION_DENIED - the watch could only ever log that error and
+        // stop, never add the count. /meet and /rand own their spaces, so the
+        // watch still works for those.
+        await safeReply(interaction, meetPost(`https://meet.google.com/${code}`));
+        return;
+      }
+    }
+
     if (interaction.commandName === "meet") {
       await interaction.deferReply(); // Meet API call can take a second or two
 
@@ -343,29 +370,6 @@ async function handleCommand(interaction) {
         await safeReply(interaction, "? Couldn't create a meeting. " + apiHint(err));
       }
       return;
-    }
-
-    // A typed `meet` in a server hands out the default preloaded link (slot
-    // 1); `meet2`… pick a specific one. There's no typed `meet1` — `meet` is
-    // it. Text-only: the slash /meet is always a fresh pooled link.
-    //
-    // Note this must not return early when the text isn't a meet, because
-    // typed `rand` falls through to its own branch below.
-    if (interaction.isTextCommand) {
-      const name = interaction.commandName ?? "";
-      const slot = name === "meet" ? "1" : /^meet([2-9]|[1-9][0-9]+)$/.exec(name)?.[1];
-      if (slot) {
-        const code = PRELOADED_MEETS[slot];
-        if (!code) return;
-
-        // No join watch here on purpose. These spaces belong to a different
-        // Google account than the one in .env, so every read comes back 403
-        // PERMISSION_DENIED — the watch could only ever log that error and
-        // stop, never add the ?. /meet and /rand own their spaces, so the
-        // watch still works for those.
-        await safeReply(interaction, meetPost(`https://meet.google.com/${code}`));
-        return;
-      }
     }
 
     if (interaction.commandName === "schedule") {
