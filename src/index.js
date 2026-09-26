@@ -266,6 +266,52 @@ client.once("ready", async () => {
 });
 
 /**
+ * Minimum seconds between two freshly created meetings.
+ *
+ * Every space creation counts against Google's CreateSpacePerMinutePerUser
+ * quota, and a held-down command or a couple of people reacting at once can
+ * burn through it fast - which then fails /meet outright with a 429. Five
+ * seconds is short enough to feel instant and long enough to absorb a burst.
+ *
+ * Scoped per channel on purpose: two busy channels shouldn't block each
+ * other, and one chatty channel is where the spam actually comes from.
+ */
+const MEET_COOLDOWN_S = 5;
+const lastMeetAt = new Map();
+
+function cooldownRemaining(channelId) {
+  const last = lastMeetAt.get(channelId);
+  if (last === undefined) return 0;
+  const elapsed = (Date.now() - last) / 1000;
+  return elapsed >= MEET_COOLDOWN_S ? 0 : MEET_COOLDOWN_S - elapsed;
+}
+
+function markMeetCreated(channelId) {
+  lastMeetAt.set(channelId, Date.now());
+  // Don't let a long-lived process accumulate one entry per channel seen.
+  if (lastMeetAt.size > 200) {
+    const cutoff = Date.now() - MEET_COOLDOWN_S * 1000;
+    for (const [id, at] of lastMeetAt) {
+      if (at < cutoff) lastMeetAt.delete(id);
+    }
+  }
+}
+
+/** Every command that mints a new space goes through here, cooldown included. */
+async function takeMeetingWithCooldown(interaction) {
+  const wait = cooldownRemaining(interaction.channelId);
+  if (wait > 0) {
+    await safeReply(
+      interaction,
+      `⏳ ${wait.toFixed(1)}s — one of those was just made. Try again in a moment.`
+    );
+    return null;
+  }
+  markMeetCreated(interaction.channelId);
+  return takeMeeting();
+}
+
+/**
  * Every command body, driven by one small interface so the slash-command
  * path and the plain-text path run identical code. Only these members are
  * touched, which is what lets a Message be adapted into an interaction.
@@ -304,7 +350,8 @@ async function handleCommand(interaction) {
       await interaction.deferReply(); // Meet API call can take a second or two
 
       try {
-        const space = await takeMeeting();
+        const space = await takeMeetingWithCooldown(interaction);
+        if (!space) return; // cooling down; already replied
 
         const message = await interaction.editReply(meetPost(space.meetingUri));
 
@@ -343,7 +390,8 @@ async function handleCommand(interaction) {
       await interaction.deferReply();
 
       try {
-        const space = await takeMeeting();
+        const space = await takeMeetingWithCooldown(interaction);
+        if (!space) return; // cooling down; already replied
         const message = await interaction.editReply(meetPost(space.meetingUri));
         watchParticipants(message, space.name);
 
