@@ -256,8 +256,15 @@ client.once("ready", async () => {
 
   client.user.setPresence({
     status: "online",
-    activities: [{ name: "Custom Status", type: ActivityType.Custom, state: "??" }],
+    activities: [{ name: "Custom Status", type: ActivityType.Custom, state: "💢" }],
   });
+
+  // Printed on every boot so the log proves which build is live: if this line
+  // is missing, the running process predates the cooldown and needs a restart.
+  console.log(
+    `⏱️ Cooldown: ${MEET_COOLDOWN_S}s per channel (applies to /meet and rand)`
+  );
+
 
   await warmUpAuth();
   await initPool();
