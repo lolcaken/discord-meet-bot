@@ -1,0 +1,20 @@
+{
+  "name": "discord-meet-bot",
+  "version": "1.0.0",
+  "description": "Discord bot that generates open-access Google Meet links via slash command.",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "auth": "node src/getToken.js",
+    "deploy": "node src/deploy-commands.js",
+    "start": "node src/index.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "discord.js": "^14.15.3",
+    "dotenv": "^16.4.5",
+    "google-auth-library": "^9.14.1"
+  }
+}
