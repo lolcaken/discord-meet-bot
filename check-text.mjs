@@ -38,6 +38,9 @@ is(42, null, "number");
 
 console.log("\n--- text: must fire ---");
 is("meet", cmd("meet"), "bare meet -> preloaded link 1");
+is("cd", cmd("meet"), "cd is an alias for meet");
+is("!cd", cmd("meet"), "!cd alias");
+is("CD", cmd("meet"), "CD uppercase alias");
 is("!meet", cmd("meet"), "bang prefixed");
 is("MEET", cmd("meet"), "uppercase");
 is("  meet  ", cmd("meet"), "padded");
@@ -47,6 +50,14 @@ is("meet3", cmd("meet3"), "meet3");
 is("meet4", cmd("meet4"), "meet4");
 is("meet9", cmd("meet9"), "unknown slot still parses (handler ignores)");
 is("meet12", cmd("meet12"), "multi-digit slot");
+
+console.log("\n--- text: near-misses on cd must NOT fire ---");
+is("cd ", cmd("meet"), "trailing space is still the command");
+is(" cdd", null, "cdd is not cd");
+is("cdd", null, "cdd");
+is("cd rom", null, "cd with a path");
+is("c", null, "single letter");
+is("cdx", null, "cd prefix");
 
 console.log("\n--- text: meet1 is NOT a command (meet is slot 1) ---");
 is("meet1", null, "typed meet1 does nothing");
