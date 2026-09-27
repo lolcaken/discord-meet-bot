@@ -55,60 +55,112 @@ export async function getSpace(name) {
 }
 
 /**
+ * Retries the network and server-side failures that resolve on their own.
+ *
+ * A connect timeout to Google is almost always a blip - a cold route, a
+ * congested VPS, a dropped SYN - and the pool would otherwise be permanently one
+ * link short until somebody happened to use /meet. These are the failures where
+ * trying again is the correct response; a 403 or a 400 means the request itself
+ * is wrong, so those still throw on the first attempt.
+ */
+const TRANSIENT_CODES = new Set([408, 425, 429, 500, 502, 503, 504]);
+const MAX_ATTEMPTS = 3;
+const BASE_BACKOFF_MS = 1_000;
+const REQUEST_TIMEOUT_MS = 20_000;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Network-level errors (DNS, reset, connect timeout) have no HTTP status. */
+function isTransient(err) {
+  if (TRANSIENT_CODES.has(err?.status)) return true;
+  const code = err?.code ?? err?.cause?.code ?? "";
+  if (typeof code === "string" && /^(ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|UND_ERR_)/.test(code)) {
+    return true;
+  }
+  // undici surfaces a bare "fetch failed" with the real reason on .cause.
+  return err instanceof TypeError && /fetch failed/i.test(err.message);
+}
+
+async function withRetry(label, fn) {
+  let lastError;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      if (!isTransient(err) || attempt === MAX_ATTEMPTS) throw err;
+      // Linear-ish backoff: ~1s then ~2s, short enough that a user waiting on
+      // /meet doesn't notice, long enough not to hammer a struggling route.
+      await sleep(BASE_BACKOFF_MS * attempt);
+      console.warn(`${label} attempt ${attempt} failed (${err.code ?? err.message}); retrying`);
+    }
+  }
+  throw lastError;
+}
+
+/**
  * Creates a new Google Meet space with "Open" access, meaning anyone with
- * the link can join immediately — no knocking / host approval required.
+ * the link can join immediately - no knocking / host approval required.
  * Uses the Google Meet REST API (meet.googleapis.com/v2/spaces).
  */
 export async function createOpenMeetSpace() {
-  const { token: accessToken } = await oAuth2Client.getAccessToken();
+  return withRetry("create space", async () => {
+    const { token: accessToken } = await oAuth2Client.getAccessToken();
 
-  const response = await fetch("https://meet.googleapis.com/v2/spaces", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      config: {
-        accessType: "OPEN", // <-- anyone with the link joins, no approval
-        entryPointAccess: "ALL",
+    const response = await fetch("https://meet.googleapis.com/v2/spaces", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
       },
-    }),
+      body: JSON.stringify({
+        config: {
+          accessType: "OPEN", // <-- anyone with the link joins, no approval
+          entryPointAccess: "ALL",
+        },
+      }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      const err = new Error(`Google Meet API error (${response.status}): ${errorBody}`);
+      err.status = response.status;
+      throw err;
+    }
+
+    const space = await response.json();
+    // space.meetingUri looks like https://meet.google.com/abc-defg-hij
+    return space;
   });
-
-  if (!response.ok) {
-    const errorBody = await response.text();
-    throw new Error(
-      `Google Meet API error (${response.status}): ${errorBody}`
-    );
-  }
-
-  const space = await response.json();
-  // space.meetingUri looks like https://meet.google.com/abc-defg-hij
-  return space;
 }
 
 /** Bearer token fetch + JSON POST/PATCH/GET with consistent error text. */
 async function call(url, init = {}) {
-  const { token: accessToken } = await oAuth2Client.getAccessToken();
+  return withRetry(`GET ${url.split("/").pop()}`, async () => {
+    const { token: accessToken } = await oAuth2Client.getAccessToken();
 
-  const response = await fetch(url, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      ...init.headers,
-    },
+    const response = await fetch(url, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        ...init.headers,
+      },
+      signal: init.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      const err = new Error(`Google Meet API error (${response.status}): ${errorBody}`);
+      err.status = response.status;
+      throw err;
+    }
+
+    if (response.status === 204) return null;
+    const text = await response.text();
+    return text ? JSON.parse(text) : null;
   });
-
-  if (!response.ok) {
-    const errorBody = await response.text();
-    throw new Error(`Google Meet API error (${response.status}): ${errorBody}`);
-  }
-
-  if (response.status === 204) return null;
-  const text = await response.text();
-  return text ? JSON.parse(text) : null;
 }
 
 /**
