@@ -18,7 +18,7 @@ import {
 import { initPool, takeMeeting } from "./meetingPool.js";
 import { addSchedule, loadSchedules, removeSchedule } from "./scheduleStore.js";
 import { rememberSpace, latestSpace } from "./spaceRegistry.js";
-import { PRELOADED_MEETS } from "./preloadedMeets.js";
+import { PRELOADED_MEETS, UNCOUNTABLE } from "./preloadedMeets.js";
 import { parseTextCommand } from "./textCommands.js";
 import { logMeetingCreated } from "./logger.js";
 
@@ -273,49 +273,55 @@ client.once("ready", async () => {
 });
 
 /**
- * Minimum seconds between two freshly created meetings.
+ * Minimum seconds between two meeting posts, per channel.
  *
- * Every space creation counts against Google's CreateSpacePerMinutePerUser
- * quota, and a held-down command or a couple of people reacting at once can
- * burn through it fast - which then fails /meet outright with a 429. Five
- * seconds is short enough to feel instant and long enough to absorb a burst.
+ * Two separate gates, because they guard different things:
  *
- * Scoped per channel on purpose: two busy channels shouldn't block each
- * other, and one chatty channel is where the spam actually comes from.
+ *   "new"       - /meet and rand mint a space, and every creation counts
+ *                 against Google's CreateSpacePerMinutePerUser quota. A burst
+ *                 can exhaust it and fail the command outright with a 429.
+ *   "preloaded" - cd and meet2-4 just repost a fixed URL, so there's no quota
+ *                 to protect. This gate exists to stop channel spam.
+ *
+ * Scoped per channel on purpose: two busy channels shouldn't block each other,
+ * and one chatty channel is where the spam actually comes from.
  */
 const MEET_COOLDOWN_S = 5;
-const lastMeetAt = new Map();
+const lastPostAt = { new: new Map(), preloaded: new Map() };
 
-function cooldownRemaining(channelId) {
-  const last = lastMeetAt.get(channelId);
+function cooldownRemaining(gate, channelId) {
+  const last = lastPostAt[gate].get(channelId);
   if (last === undefined) return 0;
   const elapsed = (Date.now() - last) / 1000;
   return elapsed >= MEET_COOLDOWN_S ? 0 : MEET_COOLDOWN_S - elapsed;
 }
 
-function markMeetCreated(channelId) {
-  lastMeetAt.set(channelId, Date.now());
+function markPosted(gate, channelId) {
+  lastPostAt[gate].set(channelId, Date.now());
   // Don't let a long-lived process accumulate one entry per channel seen.
-  if (lastMeetAt.size > 200) {
+  const seen = lastPostAt[gate];
+  if (seen.size > 200) {
     const cutoff = Date.now() - MEET_COOLDOWN_S * 1000;
-    for (const [id, at] of lastMeetAt) {
-      if (at < cutoff) lastMeetAt.delete(id);
+    for (const [id, at] of seen) {
+      if (at < cutoff) seen.delete(id);
     }
   }
 }
 
-/** Every command that mints a new space goes through here, cooldown included. */
+/** Mints a new space, gated by the quota-protecting "new" cooldown. */
 async function takeMeetingWithCooldown(interaction) {
-  const wait = cooldownRemaining(interaction.channelId);
+  const wait = cooldownRemaining("new", interaction.channelId);
   if (wait > 0) {
-    await safeReply(
-      interaction,
-      `⏳ ${wait.toFixed(1)}s — one of those was just made. Try again in a moment.`
-    );
+    await safeReply(interaction, `${secondsLeft(wait)} left`);
     return null;
   }
-  markMeetCreated(interaction.channelId);
+  markPosted("new", interaction.channelId);
   return takeMeeting();
+}
+
+/** Whole seconds, rounded up so it never says "0" while still blocking. */
+function secondsLeft(wait) {
+  return `${Math.ceil(wait)} second${Math.ceil(wait) === 1 ? "" : "s"}`;
 }
 
 /**
@@ -343,12 +349,25 @@ async function handleCommand(interaction) {
         const code = PRELOADED_MEETS[slot[1] ?? "1"];
         if (!code) return;
 
-        // No join watch here on purpose. These spaces belong to a different
-        // Google account than the one in .env, so every read comes back 403
-        // PERMISSION_DENIED - the watch could only ever log that error and
-        // stop, never add the count. /meet and /rand own their spaces, so the
-        // watch still works for those.
-        await safeReply(interaction, meetPost(`https://meet.google.com/${code}`));
+        // Anti-spam gate. Separate from the "new" gate on purpose: reposting
+        // a fixed link burns no quota, so it shouldn't lock you out of /meet.
+        const wait = cooldownRemaining("preloaded", interaction.channelId);
+        if (wait > 0) {
+          await safeReply(interaction, `${secondsLeft(wait)} left`);
+          return;
+        }
+        markPosted("preloaded", interaction.channelId);
+
+        const message = await safeReply(interaction, meetPost(`https://meet.google.com/${code}`));
+
+        // Live count, where the API will actually tell us. The Meet API only
+        // lets the owning account read a space, so this works for preloaded
+        // links that live on the same Google account as the OAuth token and
+        // logs a single line and stops for any that don't. UNCOUNTABLE lists
+        // the ones known to be unreachable so no doomed poll is even started.
+        if (!UNCOUNTABLE.includes(code)) {
+          watchParticipants(message, `spaces/${code}`);
+        }
         return;
       }
     }

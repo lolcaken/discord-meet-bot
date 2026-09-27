@@ -13,3 +13,17 @@ export const PRELOADED_MEETS = {
   3: "niq-yxfw-umm",
   4: "qsp-imra-egu",
 };
+
+/**
+ * Preloaded links to skip when starting a live participant count.
+ *
+ * The Meet API only lets the owning account read a space, so a code that
+ * belongs to a different Google account answers 403 PERMISSION_DENIED and the
+ * count can never resolve. Listing them here means no doomed poll is started
+ * at all, instead of one wasted call and a log line per post.
+ *
+ * tif-juqf-tsx is skipped deliberately. The others currently 403 too — if
+ * they ever move onto the OAuth account's Google account, deleting them here
+ * turns the live count on with no other change.
+ */
+export const UNCOUNTABLE = ["tif-juqf-tsx"];
