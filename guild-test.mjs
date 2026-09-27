@@ -60,20 +60,24 @@ say("roomCodeFor refuses in DMs: " + roomBlock[0].includes("if (!guildId) return
 check("main guild uses the fixed map",
   roomBlock[0].includes("isMainGuild(guildId)) return PRELOADED_MEETS[slot] ?? null"), true);
 
-// ---- storage, exercised on a throwaway file (no Google calls) ----
-say("\n--- per-guild storage ---");
-const { writeFileSync: wf, rmSync } = await import("node:fs");
-const dataFile = "data/guildRooms.test.json";
-rmSync(dataFile, { force: true });
-wf(dataFile, JSON.stringify({ [OTHER]: { 1: "aaa-bbb-ccc" } }), "utf8");
+// ---- storage, exercised on a throwaway DATA_DIR (no Google calls) ----
+say("\n--- per-server room storage ---");
+const { mkdtempSync, writeFileSync: wf, mkdirSync: md, rmSync } = await import("node:fs");
+const { tmpdir } = await import("node:os");
+const nodePath = await import("node:path");
+const tmp = mkdtempSync(nodePath.join(tmpdir(), "meetbot-rooms-"));
 
-process.env.GUILD_ROOMS_FILE = dataFile;
+const A = "111111111111111111";
+md(nodePath.join(tmp, "guilds", A), { recursive: true });
+wf(nodePath.join(tmp, "guilds", A, "rooms.json"), JSON.stringify({ 1: "aaa-bbb-ccc" }), "utf8");
+
+process.env.DATA_DIR = tmp;
 const { getGuildRoom } = await import("./src/guildRooms.js");
 
-check("stored room reads back", (await getGuildRoom(OTHER, "1")), "aaa-bbb-ccc");
-check("missing slot is null", (await getGuildRoom(OTHER, "2")), null);
-check("unknown guild is null", (await getGuildRoom("nope", "1")), null);
-rmSync(dataFile, { force: true });
+check("stored room reads back", (await getGuildRoom(A, "1")), "aaa-bbb-ccc");
+check("missing slot is null", (await getGuildRoom(A, "2")), null);
+check("unknown server is null", (await getGuildRoom("222222222222222222", "1")), null);
+rmSync(tmp, { recursive: true, force: true });
 
 say(`\n${fail === 0 ? "ALL PASSED" : fail + " FAILED"}`);
 process.exitCode = fail ? 1 : 0;

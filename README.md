@@ -91,6 +91,30 @@ The main guild's four codes are never regenerated, so they stay exactly as confi
 Slash commands still *appear* in every server, because Discord has no per-guild command
 visibility. Reserved ones answer with a short refusal instead.
 
+## Where its data lives
+
+One folder per server, JSON files inside, all under `data/` (gitignored):
+
+```
+data/guilds/<guildId>/rooms.json       standing rooms for that server
+data/guilds/<guildId>/spaces.json      meetings it handed out there
+data/guilds/<guildId>/schedules.json   pending /schedule entries
+data/dms/<userId>/spaces.json          the same, for a DM
+```
+
+Scoping per server isn't cosmetic. With one shared file, `/end` in a server could drop
+a call that had been started in a completely different one — it only ever matched on
+channel, and a DM and a server with the same channel name were indistinguishable.
+
+Folder names come from Discord's numeric snowflake, and anything that isn't one is
+rejected before it reaches the filesystem. Files are written to a temporary name and
+renamed into place, so a crash mid-write can't truncate a record, and a file that is
+corrupt anyway reads back as empty instead of taking the bot down.
+
+The old flat `data/*.json` files are migrated on first boot, and renamed to
+`*.migrated` rather than deleted. Spaces that predate this layout carry no guild id, so
+they land in the main guild's folder.
+
 ## Logging
 
 Every command is recorded to `logs/activity.log` as one JSON object per line, and to a

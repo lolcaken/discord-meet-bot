@@ -1,48 +1,46 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileIn, readJson, writeJson } from "./dataPaths.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = path.join(__dirname, "..", "data");
-const FILE = path.join(DATA_DIR, "spaces.json");
+/**
+ * Meetings the bot handed out, one file per server (or per DM user), so
+ * /end can say what "the latest meeting" means.
+ *
+ * Scoping this per server is the point: a shared file meant /end in one server
+ * could drop a call that was started in another, because it only ever matched
+ * on channel, and a DM and a server with the same channel name were
+ * indistinguishable.
+ *
+ * Deliberately separate from schedules.json: schedules are single-use pending
+ * work, this is a rolling history, and letting one overwrite the other is how
+ * you lose data.
+ */
 
 const MAX_ENTRIES = 50;
 
-/**
- * Remembers which spaces the bot handed out, so /end knows what "the latest
- * meeting" means.
- *
- * This is deliberately separate from schedules.json: schedules are
- * single-use pending work, this is a rolling history of spaces, and
- * overwriting one file from two unrelated code paths is how you lose data.
- */
-export async function rememberSpace({ name, code, uri, channelId, requestedBy }) {
-  if (!existsSync(DATA_DIR)) await mkdir(DATA_DIR, { recursive: true });
+const file = (scope) => fileIn(scope, "spaces.json");
 
-  const entries = await loadSpaces();
+/**
+ * Records a space. `scope` is { guildId } in a server or { userId } in a DM;
+ * entry is { name, code, uri, channelId, requestedBy }.
+ */
+export async function rememberSpace(scope, entry) {
+  const target = file(scope);
+  const entries = await readJson(target, []);
   const next = [
-    { name, code, uri, channelId: channelId ?? null, requestedBy: requestedBy ?? null, at: new Date().toISOString() },
-    ...entries.filter((e) => e.name !== name),
+    { ...entry, at: new Date().toISOString() },
+    ...(Array.isArray(entries) ? entries : []).filter((e) => e?.name !== entry?.name),
   ].slice(0, MAX_ENTRIES);
 
-  await writeFile(FILE, JSON.stringify(next, null, 2), "utf8");
+  await writeJson(target, next);
   return next;
 }
 
-export async function loadSpaces() {
-  if (!existsSync(FILE)) return [];
-  try {
-    const parsed = JSON.parse(await readFile(FILE, "utf8"));
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    // A half-written file shouldn't take the bot down; treat it as empty.
-    return [];
+/** Most recently handed-out space in a scope, optionally within one channel. */
+export async function latestSpace(scope, channelId) {
+  const entries = await readJson(file(scope), []);
+  if (!Array.isArray(entries) || !entries.length) return null;
+  if (channelId) {
+    const inChannel = entries.find((e) => e?.channelId && e.channelId === channelId);
+    if (inChannel) return inChannel;
   }
-}
-
-/** Most recently handed-out space, optionally scoped to one channel. */
-export async function latestSpace(channelId) {
-  const entries = await loadSpaces();
-  return entries.find((e) => e.channelId && e.channelId === channelId) ?? entries[0] ?? null;
+  return entries[0] ?? null;
 }

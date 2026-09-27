@@ -1,47 +1,48 @@
-import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileIn, readJson, writeJson, listScopes } from "./dataPaths.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = path.join(__dirname, "..", "data");
-const FILE_PATH = path.join(DATA_DIR, "schedules.json");
+/**
+ * Pending /schedule entries, one file per server (or per DM user).
+ *
+ * Each entry is remembered with the scope it belongs to, so a scheduled post
+ * fires back into the right server even though the timer has no idea where it
+ * came from.
+ */
 
-async function ensureFile() {
-  if (!existsSync(DATA_DIR)) await mkdir(DATA_DIR, { recursive: true });
-  if (!existsSync(FILE_PATH)) await writeFile(FILE_PATH, "[]", "utf8");
-}
+const file = (scope) => fileIn(scope, "schedules.json");
 
-/** Returns the full array of pending schedules. */
-export async function loadSchedules() {
-  await ensureFile();
-  const raw = await readFile(FILE_PATH, "utf8");
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return [];
+/** Every pending schedule across every scope, for the boot-time sweep. */
+export async function loadAllSchedules() {
+  const out = [];
+  for (const scope of await listScopes()) {
+    const scopeArg = scope.guildId ? { guildId: scope.guildId } : { userId: scope.userId };
+    const entries = await readJson(file(scopeArg), []);
+    if (!Array.isArray(entries)) continue;
+    for (const entry of entries) {
+      if (entry && typeof entry === "object") out.push({ ...entry, __scope: scopeArg });
+    }
   }
+  return out;
 }
 
-async function save(schedules) {
-  await ensureFile();
-  await writeFile(FILE_PATH, JSON.stringify(schedules, null, 2), "utf8");
+/** Pending schedules in one scope. */
+export async function loadSchedules(scope) {
+  const entries = await readJson(file(scope), []);
+  return Array.isArray(entries) ? entries : [];
 }
 
 /**
- * Adds a schedule and returns it (with a generated id).
+ * Adds a schedule and returns it with a generated id.
  * schedule: { runAt, channelId, guildId, title, notifyRoleId, requestedBy }
  */
-export async function addSchedule(schedule) {
-  const schedules = await loadSchedules();
+export async function addSchedule(scope, schedule) {
+  const schedules = await loadSchedules(scope);
   const entry = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, ...schedule };
-  schedules.push(entry);
-  await save(schedules);
+  await writeJson(file(scope), [...schedules, entry]);
   return entry;
 }
 
-/** Removes a schedule by id (call this once it has fired). */
-export async function removeSchedule(id) {
-  const schedules = await loadSchedules();
-  await save(schedules.filter((s) => s.id !== id));
+/** Removes a schedule by id. Call this once it has fired. */
+export async function removeSchedule(scope, id) {
+  const schedules = await loadSchedules(scope);
+  await writeJson(file(scope), schedules.filter((s) => s?.id !== id));
 }

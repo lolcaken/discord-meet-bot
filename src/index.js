@@ -16,9 +16,10 @@ import {
   listParticipants,
 } from "./googleMeet.js";
 import { initPool, takeMeeting, poolSize } from "./meetingPool.js";
-import { addSchedule, loadSchedules, removeSchedule } from "./scheduleStore.js";
+import { addSchedule, loadAllSchedules, removeSchedule } from "./scheduleStore.js";
 import { rememberSpace, latestSpace } from "./spaceRegistry.js";
 import { getOrCreateGuildRoom, countServicedGuilds } from "./guildRooms.js";
+import { migrateLegacyData } from "./dataPaths.js";
 import { PRELOADED_MEETS } from "./preloadedMeets.js";
 import { parseTextCommand } from "./textCommands.js";
 import {
@@ -192,7 +193,7 @@ async function resolveSpace(interaction) {
     const match = code.toLowerCase().match(/[a-z]{3}-[a-z]{4}-[a-z]{3}/)?.[0];
     return match ? { name: `spaces/${match}`, code: match } : null;
   }
-  return latestSpace(interaction.channelId);
+  return latestSpace(scopeOf(interaction), interaction.channelId);
 }
 
 function buildMeetEmbed({ space, title, requestedByTag }) {
@@ -218,7 +219,10 @@ function buildMeetEmbed({ space, title, requestedByTag }) {
 }
 
 async function fireSchedule(schedule) {
-  await removeSchedule(schedule.id); // remove first so a crash can't loop-fire it
+  // The scope rides along on the entry, because a bare timer has no idea which
+  // server it belongs to.
+  const scope = schedule.__scope ?? (schedule.guildId ? { guildId: schedule.guildId } : { userId: schedule.requestedById });
+  await removeSchedule(scope, schedule.id); // remove first so a crash can't loop-fire it
   try {
     const channel = await client.channels.fetch(schedule.channelId);
     const space = await takeMeeting();
@@ -231,7 +235,7 @@ async function fireSchedule(schedule) {
     const content = schedule.notifyRoleId ? `<@&${schedule.notifyRoleId}>` : undefined;
     await channel.send({ content, embeds, components });
 
-    await rememberSpace({
+    await rememberSpace(scope, {
       name: space.name,
       code: space.meetingCode,
       uri: space.meetingUri,
@@ -276,10 +280,13 @@ function scheduleTimer(schedule) {
 }
 
 async function scanAndArm() {
-  const schedules = await loadSchedules();
+  // Sweeps every scope, so a schedule in one server still fires even when
+  // another server is the one with new activity.
+  const schedules = await loadAllSchedules();
   const now = Date.now();
   let armed = 0;
   for (const schedule of schedules) {
+    if (!schedule.runAt) continue;
     if (new Date(schedule.runAt).getTime() <= now) {
       await fireSchedule(schedule); // overdue (e.g. bot was offline) — fire immediately
     } else {
@@ -310,7 +317,15 @@ client.once("ready", async () => {
 
   await warmUpAuth();
   await initPool();
+
+  // One-time, idempotent: files that predate the per-server layout.
+  const migrated = await migrateLegacyData({ mainGuildId: MAIN_GUILD_ID });
+  if (migrated.length) {
+    console.log(`📦 Migrated to per-server data folders: ${migrated.join("; ")}`);
+  }
+
   const pending = await scanAndArm();
+  const serviced = await countServicedGuilds();
 
   await logReady({
     user: client.user.tag,
@@ -319,8 +334,10 @@ client.once("ready", async () => {
     cooldownSeconds: MEET_COOLDOWN_S,
     poolSize: poolSize(),
     pendingSchedules: pending,
+    serversWithRooms: serviced,
+    migrated: migrated.length ? migrated.join("; ") : null,
     node: process.version,
-    summary: `Ready. Main guild ${MAIN_GUILD_ID || "(unset)"}; pool ${poolSize()}; ${pending} schedule(s) pending.`,
+    summary: `Ready. Main guild ${MAIN_GUILD_ID || "(unset)"}; pool ${poolSize()}; ${serviced} server(s) with rooms; ${pending} schedule(s) pending.`,
   });
 
   setInterval(scanAndArm, RECHECK_INTERVAL_MS);
@@ -400,9 +417,16 @@ async function roomCodeFor(guildId, slot) {
 }
 
 /**
- * Where a command came from. Spread into every log call so the file and the
- * webhook carry the same shape whatever triggered it.
+ * Where a command's data belongs: a server folder, or a per-user folder for a
+ * DM. Every store is keyed on this, so nothing written in one place can be
+ * read back in another.
  */
+function scopeOf(interaction) {
+  return interaction.guildId ? { guildId: interaction.guildId } : { userId: interaction.user?.id };
+}
+
+/** Where a command came from. Spread into every log call so the file and the
+ * webhook carry the same shape whatever triggered it. */
 function where(interaction) {
   return {
     guildId: interaction.guildId ?? null,
@@ -520,7 +544,7 @@ async function handleCommand(interaction) {
           const message = await safeReply(interaction, meetPost(fresh.meetingUri));
           watchParticipants(message, fresh.name);
 
-          await rememberSpace({
+          await rememberSpace(scopeOf(interaction), {
             name: fresh.name,
             code: fresh.meetingCode,
             uri: fresh.meetingUri,
@@ -569,7 +593,7 @@ async function handleCommand(interaction) {
 
         watchParticipants(message, space.name);
 
-        await rememberSpace({
+        await rememberSpace(scopeOf(interaction), {
           name: space.name,
           code: space.meetingCode,
           uri: space.meetingUri,
@@ -609,7 +633,7 @@ async function handleCommand(interaction) {
         const message = await interaction.editReply(meetPost(space.meetingUri));
         watchParticipants(message, space.name);
 
-        await rememberSpace({
+        await rememberSpace(scopeOf(interaction), {
           name: space.name,
           code: space.meetingCode,
           uri: space.meetingUri,
@@ -653,7 +677,7 @@ async function handleCommand(interaction) {
 
       const runAt = new Date(Date.now() + minutes * 60_000);
 
-      const schedule = await addSchedule({
+      const schedule = await addSchedule(scopeOf(interaction), {
         runAt: runAt.toISOString(),
         channelId: interaction.channelId,
         guildId: interaction.guildId,
