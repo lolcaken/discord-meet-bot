@@ -40,7 +40,7 @@ type them, no slash needed.
 
 | Type this | Or use | What happens |
 | --- | --- | --- |
-| `cd` or `meet` | — | The default standing room, `tgc-rzea-btb` |
+| `cd` or `meet` | — | The default standing room |
 | `meet2` `meet3` `meet4` | — | The other standing rooms |
 | `rand` | `/rand` | A brand new link from the pool |
 | — | `/meet` | A brand new link, plus an `@everyone` ping |
@@ -53,13 +53,16 @@ type them, no slash needed.
 
 ### Live participant count
 
-`/meet` and `/rand` watch their own space and edit the message with a live headcount.
-That works because Meet exposes each participant's `latest_end_time`, and a null value
-means "hasn't left yet" — so the count is re-read every 15 seconds rather than latched
-on the first person to arrive.
+Every command that posts a link also watches its space and edits the message with a
+live headcount — the standing rooms included. That works because Meet exposes each
+participant's `latest_end_time`, and a null value means "hasn't left yet" — so the
+count is re-read every 15 seconds rather than latched on the first person to arrive.
 
-A 👤 count is *not* available for the standing rooms: they belong to a different Google
-account than the bot's OAuth token, so the API correctly refuses to read them.
+The standing rooms are created through this project's own OAuth token, which is what
+makes them readable: **the Meet API scopes space access per Google Cloud project, not
+per person.** A space made in the same Gmail account but by a different project still
+answers `403 PERMISSION_DENIED`, so links copied in from elsewhere silently break the
+count.
 
 ## Setup
 
