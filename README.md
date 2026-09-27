@@ -64,6 +64,57 @@ per person.** A space made in the same Gmail account but by a different project 
 answers `403 PERMISSION_DENIED`, so links copied in from elsewhere silently break the
 count.
 
+## Multiple servers
+
+`MAIN_GUILD_ID` in `.env` marks your own server. It gets the fixed standing rooms
+and the commands reserved for it. Every other server gets **its own** standing rooms,
+minted from the same Google account the first time that room is used — so the Meet API
+can read them and the live 👤 count works there too.
+
+| | Main guild | Other servers | DM |
+| --- | --- | --- | --- |
+| `/meet`, `/rand`, typed `rand` | yes | yes | yes |
+| typed `meet`, `meet2`–`meet4` | fixed rooms | its own generated rooms | — |
+| `/schedule` | yes | yes | no |
+| `/end` | yes | **no** | no |
+
+Rooms are created one at a time, on demand: a server that only ever types `meet`
+costs exactly one space against Google's create quota, not four. They're remembered in
+`data/guildRooms.json`. If a mint fails — a rate limit, say — the bot posts a pooled link
+instead so nobody is left without a way in.
+
+The main guild's four codes are never regenerated, so they stay exactly as configured in
+`src/preloadedMeets.js`.
+
+Slash commands still *appear* in every server, because Discord has no per-guild command
+visibility. Reserved ones answer with a short refusal instead.
+
+## Logging
+
+Every command is recorded to `logs/activity.log` as one JSON object per line, and to a
+Discord webhook if `DISCORD_LOG_WEBHOOK_URL` is set. Events are named so they can be
+grepped:
+
+| Event | Level | Means |
+| --- | --- | --- |
+| `bot.ready` | info | boot: pool size, pending schedules, main guild |
+| `command.received` | info | anything invoked, typed or slash |
+| `meet.created` | info | a new space was minted |
+| `room.posted` | info | a standing room was shared |
+| `room.generated` | info | a new server got one of its own rooms |
+| `schedule.created` | info | a meeting was scheduled |
+| `conference.ended` | info | `/end` dropped a live call |
+| `request.throttled` | warn | a cooldown refused a request |
+| `command.denied` | warn | reserved command, or nothing to end |
+| `command.failed` | error | something broke, with the reason |
+
+`DISCORD_ERROR_WEBHOOK_URL` optionally routes only errors somewhere separate, so
+failures aren't buried in routine activity. The file rotates at 1 MB, keeping three
+generations — without that it would grow until the disk filled.
+
+The webhook is fired without being awaited, so a slow Discord never delays a reply, and
+a rate-limited webhook is dropped with one console line rather than retried.
+
 ## Setup
 
 ### 1. Discord

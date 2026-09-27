@@ -15,17 +15,42 @@ import {
   endActiveConference,
   listParticipants,
 } from "./googleMeet.js";
-import { initPool, takeMeeting } from "./meetingPool.js";
+import { initPool, takeMeeting, poolSize } from "./meetingPool.js";
 import { addSchedule, loadSchedules, removeSchedule } from "./scheduleStore.js";
 import { rememberSpace, latestSpace } from "./spaceRegistry.js";
+import { getOrCreateGuildRoom, countServicedGuilds } from "./guildRooms.js";
 import { PRELOADED_MEETS } from "./preloadedMeets.js";
 import { parseTextCommand } from "./textCommands.js";
-import { logMeetingCreated } from "./logger.js";
+import {
+  logReady,
+  logCommand,
+  logMeetCreated,
+  logRoomPosted,
+  logScheduled,
+  logEnded,
+  logBlocked,
+  logDenied,
+  logFailure,
+} from "./logger.js";
 
 if (!process.env.DISCORD_TOKEN) {
   console.error("Missing DISCORD_TOKEN in your .env file. Can't start the bot.");
   process.exit(1);
 }
+
+/**
+ * The guild that owns the fixed standing rooms and the commands reserved for
+ * it. Every other server gets its own generated rooms and the shared command
+ * set.
+ */
+const MAIN_GUILD_ID = process.env.MAIN_GUILD_ID || "";
+const isMainGuild = (guildId) => guildId === MAIN_GUILD_ID;
+
+/** Reserved for the main guild only. */
+const MAIN_ONLY = new Set(["end"]);
+/** Fine in any server, but meaningless in a DM where there's no channel list. */
+const GUILD_ONLY = new Set(["schedule"]);
+
 
 // Without these, a single bad promise or a websocket hiccup would otherwise
 // silently kill the whole process (modern Node exits on unhandled
@@ -214,16 +239,27 @@ async function fireSchedule(schedule) {
       requestedBy: schedule.requestedByTag,
     });
 
-    await logMeetingCreated({
-      username: schedule.requestedByTag,
-      userId: schedule.requestedById,
-      context: channel.guild ? `#${channel.name} in ${channel.guild.name}` : "DM",
-      meetingUri: space.meetingUri,
+    await logMeetCreated({
+      guildId: channel.guild?.id ?? null,
+      guildName: channel.guild?.name ?? null,
+      channelId: schedule.channelId,
+      channelName: channel.name ?? null,
+      user: schedule.requestedByTag ?? null,
+      userId: schedule.requestedById ?? null,
+      command: "/schedule",
+      via: "scheduled",
       meetingCode: space.meetingCode,
-      via: "/schedule",
+      meetingUri: space.meetingUri,
+      scheduledFor: schedule.runAt,
     });
   } catch (err) {
     console.error(`Failed to fire scheduled meeting ${schedule.id}:`, err);
+    await logFailure({
+      scheduleId: schedule.id,
+      channelId: schedule.channelId,
+      reason: err.message,
+      summary: `A scheduled meeting failed to post in channel ${schedule.channelId}.`,
+    });
   }
 }
 
@@ -242,16 +278,20 @@ function scheduleTimer(schedule) {
 async function scanAndArm() {
   const schedules = await loadSchedules();
   const now = Date.now();
+  let armed = 0;
   for (const schedule of schedules) {
     if (new Date(schedule.runAt).getTime() <= now) {
       await fireSchedule(schedule); // overdue (e.g. bot was offline) — fire immediately
     } else {
       scheduleTimer(schedule);
+      armed++;
     }
   }
+  return armed;
 }
 
 client.once("ready", async () => {
+
   console.log(`? Logged in as ${client.user.tag}`);
 
   client.user.setPresence({
@@ -264,11 +304,25 @@ client.once("ready", async () => {
   console.log(
     `⏱️ Cooldown: ${MEET_COOLDOWN_S}s per channel (applies to /meet and rand)`
   );
-
+  console.log(
+    `🏠 Main guild: ${MAIN_GUILD_ID || "NOT SET - no guild gets the reserved commands"}`
+  );
 
   await warmUpAuth();
   await initPool();
-  await scanAndArm();
+  const pending = await scanAndArm();
+
+  await logReady({
+    user: client.user.tag,
+    mainGuildId: MAIN_GUILD_ID || null,
+    mainGuildConfigured: Boolean(MAIN_GUILD_ID),
+    cooldownSeconds: MEET_COOLDOWN_S,
+    poolSize: poolSize(),
+    pendingSchedules: pending,
+    node: process.version,
+    summary: `Ready. Main guild ${MAIN_GUILD_ID || "(unset)"}; pool ${poolSize()}; ${pending} schedule(s) pending.`,
+  });
+
   setInterval(scanAndArm, RECHECK_INTERVAL_MS);
 });
 
@@ -312,6 +366,14 @@ function markPosted(gate, channelId) {
 async function takeMeetingWithCooldown(interaction) {
   const wait = cooldownRemaining("new", interaction.channelId);
   if (wait > 0) {
+    await logBlocked({
+      command: interaction.commandName,
+      guildId: interaction.guildId ?? null,
+      channelId: interaction.channelId,
+      user: interaction.user?.username,
+      gate: "new",
+      retryInSeconds: Number(wait.toFixed(1)),
+    });
     await safeReply(interaction, `${secondsLeft(wait)} left`);
     return null;
   }
@@ -325,6 +387,49 @@ function secondsLeft(wait) {
 }
 
 /**
+ * The standing-room code for a slot, per server.
+ *
+ * The main guild's four codes are fixed and are never regenerated. Any other
+ * server gets its own, minted from the same Google account the first time that
+ * slot is used, so the Meet API can read it and the live count works.
+ */
+async function roomCodeFor(guildId, slot) {
+  if (isMainGuild(guildId)) return PRELOADED_MEETS[slot] ?? null;
+  if (!guildId) return null; // DMs have no rooms; they use /meet and /rand
+  return getOrCreateGuildRoom(guildId, slot);
+}
+
+/**
+ * Where a command came from. Spread into every log call so the file and the
+ * webhook carry the same shape whatever triggered it.
+ */
+function where(interaction) {
+  return {
+    guildId: interaction.guildId ?? null,
+    guildName: interaction.guild?.name ?? null,
+    channelId: interaction.channelId ?? null,
+    channelName: interaction.channel?.name ?? null,
+    user: interaction.user?.username ?? null,
+    userId: interaction.user?.id ?? null,
+    via: interaction.isTextCommand ? "typed" : "slash",
+  };
+}
+
+/** One place that answers "may this command run here?", so the rules can't drift. */
+function checkAllowed(interaction) {
+  const name = interaction.commandName;
+  const guildId = interaction.guildId ?? null;
+
+  if (MAIN_ONLY.has(name) && !isMainGuild(guildId)) {
+    return `\`/${name}\` is only available in the main server.`;
+  }
+  if (GUILD_ONLY.has(name) && !guildId) {
+    return `\`/${name}\` needs a server, so it can't be used in a DM.`;
+  }
+  return null;
+}
+
+/**
  * Every command body, driven by one small interface so the slash-command
  * path and the plain-text path run identical code. Only these members are
  * touched, which is what lets a Message be adapted into an interaction.
@@ -332,6 +437,26 @@ function secondsLeft(wait) {
 async function handleCommand(interaction) {
   {
     try {
+    await logCommand({
+      command: interaction.commandName,
+      user: interaction.user?.username,
+      userId: interaction.user?.id,
+      channelId: interaction.channelId,
+      guildId: interaction.guildId ?? null,
+      via: interaction.isTextCommand ? "typed" : "slash",
+    });
+
+    const refusal = checkAllowed(interaction);
+    if (refusal) {
+      await logDenied({
+        command: interaction.commandName,
+        guildId: interaction.guildId ?? null,
+        user: interaction.user?.username,
+        reason: refusal,
+      });
+      return void (await safeReply(interaction, { content: refusal, ephemeral: true }));
+    }
+
     // Typed commands are matched FIRST, and deliberately so. A typed `meet`
     // carries the same commandName as the slash /meet, so if the /meet branch
     // were checked first it would swallow it and hand out a random pooled
@@ -346,24 +471,66 @@ async function handleCommand(interaction) {
       // a text command, and it must fall through to its own random branch.
       const slot = /^meet(?:([2-9]|[1-9][0-9]+))?$/.exec(name);
       if (slot) {
-        const code = PRELOADED_MEETS[slot[1] ?? "1"];
-        if (!code) return;
+        const slotKey = slot[1] ?? "1";
 
-        // Anti-spam gate. Separate from the "new" gate on purpose: reposting
-        // a fixed link burns no quota, so it shouldn't lock you out of /meet.
+        // Anti-spam gate runs BEFORE any room is minted, so a burst of spam
+        // can never burn Google's create quota. Separate from the "new" gate on
+        // purpose: reposting a room burns no quota, so it shouldn't lock you
+        // out of /meet.
         const wait = cooldownRemaining("preloaded", interaction.channelId);
         if (wait > 0) {
+          await logBlocked({
+            command: name,
+            slot: slotKey,
+            guildId: interaction.guildId ?? null,
+            channelId: interaction.channelId,
+            user: interaction.user?.username,
+            gate: "preloaded",
+            retryInSeconds: Number(wait.toFixed(1)),
+          });
           await safeReply(interaction, `${secondsLeft(wait)} left`);
           return;
         }
         markPosted("preloaded", interaction.channelId);
 
+        let code = null;
+        try {
+          code = await roomCodeFor(interaction.guildId ?? null, slotKey);
+        } catch (err) {
+          // Google refused or rate limited the mint. Rather than leaving
+          // everyone in the channel without a link, fall back to a pooled one.
+          const fallback = await takeMeeting();
+          code = fallback.meetingCode;
+          await logFailure({
+            command: name,
+            slot: slotKey,
+            guildId: interaction.guildId ?? null,
+            user: interaction.user?.username,
+            reason: err.message,
+            fellBackTo: code,
+            summary: `Couldn't mint room ${slotKey} for server ${interaction.guildId}, posted a pooled link instead.`,
+          });
+        }
+
+        if (!code) return;
+
         const message = await safeReply(interaction, meetPost(`https://meet.google.com/${code}`));
 
-        // Live count. Every preloaded code was minted through this project's
-        // own token, so the Meet API lets us read the space and count who's in
-        // it. The watch logs one line and stops if a read ever fails.
+        // Live count. Every room is minted through this project's own token, so
+        // the Meet API lets us read the space and count who's in it. The watch
+        // logs one line and stops if a read ever fails.
         watchParticipants(message, `spaces/${code}`);
+
+        await logRoomPosted({
+          command: name,
+          slot: slotKey,
+          guildId: interaction.guildId ?? null,
+          channelId: interaction.channelId,
+          user: interaction.user?.username,
+          userId: interaction.user?.id,
+          meetingCode: code,
+          isMainGuild: isMainGuild(interaction.guildId ?? null),
+        });
         return;
       }
     }
@@ -387,18 +554,20 @@ async function handleCommand(interaction) {
           requestedBy: interaction.user.username,
         });
 
-        await logMeetingCreated({
-          username: interaction.user.username,
-          userId: interaction.user.id,
-          context: interaction.guild
-            ? `#${interaction.channel?.name ?? "unknown"} in ${interaction.guild.name}`
-            : "DM / user-installed context",
-          meetingUri: space.meetingUri,
+        await logMeetCreated({
+          ...where(interaction),
+          command: "/meet",
           meetingCode: space.meetingCode,
-          via: "/meet",
+          meetingUri: space.meetingUri,
+          isMainGuild: isMainGuild(interaction.guildId ?? null),
         });
       } catch (err) {
         console.error("Failed to create Meet space:", err);
+        await logFailure({
+          ...where(interaction),
+          command: "/meet",
+          reason: err.message,
+        });
         await safeReply(interaction,
           "? Couldn't create a Meet link. Check the bot's logs — this usually " +
             "means the Google OAuth token expired or the Meet API isn't enabled " +
@@ -425,18 +594,20 @@ async function handleCommand(interaction) {
           requestedBy: interaction.user.username,
         });
 
-        await logMeetingCreated({
-          username: interaction.user.username,
-          userId: interaction.user.id,
-          context: interaction.guild
-            ? `#${interaction.channel?.name ?? "unknown"} in ${interaction.guild.name}`
-            : "DM / user-installed context",
-          meetingUri: space.meetingUri,
+        await logMeetCreated({
+          ...where(interaction),
+          command: "/rand",
           meetingCode: space.meetingCode,
-          via: "/rand",
+          meetingUri: space.meetingUri,
+          isMainGuild: isMainGuild(interaction.guildId ?? null),
         });
       } catch (err) {
         console.error("Failed to create Meet space for /rand:", err);
+        await logFailure({
+          ...where(interaction),
+          command: "/rand",
+          reason: err.message,
+        });
         await safeReply(interaction, "? Couldn't create a meeting. " + apiHint(err));
       }
       return;
@@ -477,6 +648,15 @@ async function handleCommand(interaction) {
           `(<t:${unixSeconds}:R>). I'll post a fresh link here when it's time` +
           `${notifyRole ? `, and ping ${notifyRole}` : ""}.`
       );
+
+      await logScheduled({
+        ...where(interaction),
+        scheduleId: schedule.id,
+        title: title ?? null,
+        minutes,
+        runsAt: schedule.runAt,
+        notifyRoleId: notifyRole?.id ?? null,
+      });
       return;
     }
 
@@ -484,16 +664,34 @@ async function handleCommand(interaction) {
       await interaction.deferReply();
 
       const space = await resolveSpace(interaction);
-      if (!space) return void (await safeReply(interaction, NO_MEETING));
+      if (!space) {
+        await logDenied({
+          ...where(interaction),
+          command: "/end",
+          reason: "no meeting on record for this channel",
+        });
+        return void (await safeReply(interaction, NO_MEETING));
+      }
 
       try {
         // No active conference means nobody ever joined — not a failure.
         const current = await getSpace(space.name);
         if (!current.activeConference) {
+          await logDenied({
+            ...where(interaction),
+            command: "/end",
+            meetingCode: space.code,
+            reason: "no live call to end",
+          });
           return void (await safeReply(interaction, `? Nobody has joined \`${space.code}\` yet, so there's no call to end.`));
         }
 
         await endActiveConference(space.name);
+        await logEnded({
+          ...where(interaction),
+          meetingCode: space.code,
+          meetingUri: current.meetingUri,
+        });
         await safeReply(interaction, `?? Ended the call in \`${space.code}\`. Everyone still in it was dropped.`);
       } catch (err) {
         console.error("Failed to end active conference:", err);
@@ -503,6 +701,12 @@ async function handleCommand(interaction) {
         if (/no active conference/i.test(err.message)) {
           return void (await safeReply(interaction, `? Everyone had already left \`${space.code}\`.`));
         }
+        await logFailure({
+          ...where(interaction),
+          command: "/end",
+          meetingCode: space.code,
+          reason: err.message,
+        });
         await safeReply(interaction, "? Couldn't end the meeting. " + apiHint(err));
       }
       return;
@@ -511,6 +715,12 @@ async function handleCommand(interaction) {
     // Belt-and-braces: whatever went wrong, don't let it escape and take
     // the bot down — log it and let the user know something failed.
     console.error("Unexpected error handling command:", err);
+    await logFailure({
+      ...where(interaction),
+      command: interaction.commandName,
+      reason: err.message,
+      summary: "Unhandled error while running a command.",
+    });
     await safeReply(interaction, "? Something went wrong running that command.");
   }
   }
