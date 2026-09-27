@@ -96,11 +96,23 @@ visibility. Reserved ones answer with a short refusal instead.
 One folder per server, JSON files inside, all under `data/` (gitignored):
 
 ```
-data/guilds/<guildId>/rooms.json       standing rooms for that server
-data/guilds/<guildId>/spaces.json      meetings it handed out there
-data/guilds/<guildId>/schedules.json   pending /schedule entries
-data/dms/<userId>/spaces.json          the same, for a DM
+data/guilds/<guildId>/server.json          who this server is
+data/guilds/<guildId>/rooms.json           standing rooms for that server
+data/guilds/<guildId>/spaces.json          meetings it handed out there
+data/guilds/<guildId>/schedules.json       pending /schedule entries
+data/guilds/<guildId>/stats.json           totals, by-day counts, first/last meeting
+data/guilds/<guildId>/schedules-report.json  what's pending and what's next
+data/dms/<userId>/user.json                who the DM belongs to
 ```
+
+`server.json` exists because a folder named `1550540829112795187` tells you nothing —
+it records the name, member count, owner, join date, boost tier and icon, so reading a
+folder off a VPS tells you whose it is. It's refreshed at boot, every six hours, and the
+moment the bot joins a server. DM folders get the same treatment on first use.
+
+`stats.json` and `schedules-report.json` are **derived** — computed from the files
+already there, never estimated. A counter that can't be read back reports `null` rather
+than a plausible-looking number, so you can trust what's in them.
 
 Scoping per server isn't cosmetic. With one shared file, `/end` in a server could drop
 a call that had been started in a completely different one — it only ever matched on
@@ -137,6 +149,10 @@ grepped:
 `DISCORD_ERROR_WEBHOOK_URL` optionally routes only errors somewhere separate, so
 failures aren't buried in routine activity. The file rotates at 1 MB, keeping three
 generations — without that it would grow until the disk filled.
+
+Errors also land in `logs/errorlog.json` as a single JSON array, newest first, so
+`jq` or any dashboard can read them without parsing a log format. It's capped at the
+most recent 200, because it's rewritten whole on each error.
 
 The webhook is fired without being awaited, so a slow Discord never delays a reply, and
 a rate-limited webhook is dropped with one console line rather than retried.

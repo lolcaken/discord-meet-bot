@@ -1,4 +1,4 @@
-import { appendFile, mkdir, rename, stat } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,11 +6,17 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LOG_DIR = path.join(__dirname, "..", "logs");
 const LOG_FILE = path.join(LOG_DIR, "activity.log");
+const ERROR_FILE = path.join(LOG_DIR, "errorlog.json");
 
 // The log is append-only and never pruned by anything else, so without a cap
 // it grows until the disk fills. Rotate on size, keeping a few generations.
 const MAX_BYTES = 1024 * 1024;
 const KEEP = 3;
+
+// How many errors to keep in errorlog.json before dropping the oldest. It is
+// rewritten whole on every error, so it has to stay bounded or the write gets
+// slower every time.
+const MAX_ERRORS = 200;
 
 const WEBHOOK_TIMEOUT_MS = 8000;
 
@@ -25,16 +31,41 @@ async function ensureLogDir() {
   dirReady = true;
 }
 
-async function rotateIfNeeded() {
-  if (!existsSync(LOG_FILE)) return;
-  const { size } = await stat(LOG_FILE);
+async function rotateIfNeeded(file) {
+  if (!existsSync(file)) return;
+  const { size } = await stat(file);
   if (size < MAX_BYTES) return;
-  // Shift oldest first so nothing is overwritten before it's moved along.
   for (let i = KEEP - 1; i >= 1; i--) {
-    const from = `${LOG_FILE}.${i}`;
-    if (existsSync(from)) await rename(from, `${LOG_FILE}.${i + 1}`).catch(() => {});
+    const from = `${file}.${i}`;
+    if (existsSync(from)) await rename(from, `${file}.${i + 1}`).catch(() => {});
   }
-  await rename(LOG_FILE, `${LOG_FILE}.1`).catch(() => {});
+  await rename(file, `${file}.1`).catch(() => {});
+}
+
+/**
+ * Errors, kept as one JSON array in a single file so tooling (jq, a dashboard,
+ * `node -e`) can read them without parsing a log format. Read-modify-write, so
+ * it is capped rather than allowed to grow without bound.
+ */
+async function writeErrorFile(level, event, data) {
+  if (level !== "error") return;
+  try {
+    await ensureLogDir();
+    let existing = [];
+    try {
+      const parsed = JSON.parse(await readFile(ERROR_FILE, "utf8"));
+      if (Array.isArray(parsed)) existing = parsed;
+    } catch {
+      existing = [];
+    }
+    const entry = { ts: new Date().toISOString(), event, ...data };
+    const next = [entry, ...existing].slice(0, MAX_ERRORS);
+    const tmp = `${ERROR_FILE}.tmp`;
+    await writeFile(tmp, JSON.stringify(next, null, 2), "utf8");
+    await rename(tmp, ERROR_FILE);
+  } catch (err) {
+    console.error("Failed to write errorlog.json:", err.message);
+  }
 }
 
 const isBlank = (v) => v === undefined || v === null || v === "";
@@ -54,9 +85,10 @@ const clip = (value, max = 900) => {
 async function writeToFile(level, event, data) {
   try {
     await ensureLogDir();
-    await rotateIfNeeded();
+    await rotateIfNeeded(LOG_FILE);
     const record = { ts: new Date().toISOString(), level, event, ...data };
     await appendFile(LOG_FILE, JSON.stringify(record) + "\n", "utf8");
+    await writeErrorFile(level, event, data);
   } catch (err) {
     // Never let logging take the bot down.
     console.error("Failed to write the activity log:", err.message);

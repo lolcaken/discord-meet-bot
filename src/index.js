@@ -20,6 +20,8 @@ import { addSchedule, loadAllSchedules, removeSchedule } from "./scheduleStore.j
 import { rememberSpace, latestSpace } from "./spaceRegistry.js";
 import { getOrCreateGuildRoom, countServicedGuilds } from "./guildRooms.js";
 import { migrateLegacyData } from "./dataPaths.js";
+import { writeGuildInfo, writeUserInfo, refreshAllGuildInfo } from "./scopeInfo.js";
+import { refreshAllReports } from "./scopeReports.js";
 import { PRELOADED_MEETS } from "./preloadedMeets.js";
 import { parseTextCommand } from "./textCommands.js";
 import {
@@ -73,6 +75,7 @@ const GOOGLE_MEET_LOGO_URL =
 // timer, so this survives being wrong by a few minutes at worst.
 const MAX_SCHEDULE_MINUTES = 10080; // 7 days
 const RECHECK_INTERVAL_MS = 60_000; // re-scan schedules every minute
+const PROFILE_REFRESH_MS = 6 * 60 * 60 * 1000; // keep data-folder profiles current
 
 const client = new Client({
   intents: [
@@ -327,6 +330,10 @@ client.once("ready", async () => {
   const pending = await scanAndArm();
   const serviced = await countServicedGuilds();
 
+  // Name the data folders, so reading one off disk says which server it is.
+  const described = await refreshAllGuildInfo(client, { isMainGuild });
+  const reports = await refreshAllReports();
+
   await logReady({
     user: client.user.tag,
     mainGuildId: MAIN_GUILD_ID || null,
@@ -335,12 +342,32 @@ client.once("ready", async () => {
     poolSize: poolSize(),
     pendingSchedules: pending,
     serversWithRooms: serviced,
+    serversDescribed: described,
+    reportScopes: reports.scopes,
+    reportFiles: reports.files,
     migrated: migrated.length ? migrated.join("; ") : null,
     node: process.version,
-    summary: `Ready. Main guild ${MAIN_GUILD_ID || "(unset)"}; pool ${poolSize()}; ${serviced} server(s) with rooms; ${pending} schedule(s) pending.`,
+    summary: `Ready. Main guild ${MAIN_GUILD_ID || "(unset)"}; pool ${poolSize()}; ${described} server(s) described; ${pending} schedule(s) pending.`,
   });
 
   setInterval(scanAndArm, RECHECK_INTERVAL_MS);
+  // Member counts and names drift, so the folder profiles are refreshed
+  // periodically rather than only at boot.
+  setInterval(
+    () => void refreshAllGuildInfo(client, { isMainGuild }),
+    PROFILE_REFRESH_MS
+  );
+  setInterval(() => void refreshAllReports(), PROFILE_REFRESH_MS);
+});
+
+// A server added while we're running gets its profile immediately, so an
+// empty folder is never sitting around unidentified.
+client.on("guildCreate", async (guild) => {
+  try {
+    await writeGuildInfo(guild, { isMainGuild: isMainGuild(guild.id) });
+  } catch (err) {
+    console.error(`Couldn't record info for joined server ${guild.id}:`, err.message);
+  }
 });
 
 /**
@@ -425,6 +452,22 @@ function scopeOf(interaction) {
   return interaction.guildId ? { guildId: interaction.guildId } : { userId: interaction.user?.id };
 }
 
+/**
+ * Makes sure a DM folder says whose it is. Only DMs need this - server folders
+ * are described wholesale at boot and on join, from the gateway cache.
+ */
+async function describeScope(interaction) {
+  if (interaction.guildId) return;
+  const user = interaction.user;
+  if (!user?.id) return;
+  try {
+    await writeUserInfo(user);
+  } catch (err) {
+    // Never let bookkeeping break a command.
+    console.error("Couldn't record DM profile:", err.message);
+  }
+}
+
 /** Where a command came from. Spread into every log call so the file and the
  * webhook carry the same shape whatever triggered it. */
 function where(interaction) {
@@ -461,6 +504,7 @@ function checkAllowed(interaction) {
 async function handleCommand(interaction) {
   {
     try {
+    await describeScope(interaction);
     await logCommand({
       command: interaction.commandName,
       user: interaction.user?.username,
