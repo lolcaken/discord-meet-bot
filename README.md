@@ -35,8 +35,10 @@ and leave, and drops back to `0` when the room empties.
 
 ## The commands
 
-Slash commands work anywhere — servers, DMs, group chats. In servers you can also just
-type them, no slash needed.
+Slash commands work anywhere — servers, DMs, group chats. You can also just type the
+short ones with no slash, in servers **and in DMs**. `meet` and `meet2`–`meet4` post a
+standing room where one exists; in a DM there are no rooms, so you get a fresh link
+instead.
 
 | Type this | Or use | What happens |
 | --- | --- | --- |
@@ -74,7 +76,7 @@ can read them and the live 👤 count works there too.
 | | Main guild | Other servers | DM |
 | --- | --- | --- | --- |
 | `/meet`, `/rand`, typed `rand` | yes | yes | yes |
-| typed `meet`, `meet2`–`meet4` | fixed rooms | its own generated rooms | — |
+| typed `meet`, `meet2`–`meet4` | fixed rooms | its own generated rooms | fresh link (no rooms in a DM) |
 | `/schedule` | yes | yes | no |
 | `/end` | yes | **no** | no |
 

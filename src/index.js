@@ -512,7 +512,30 @@ async function handleCommand(interaction) {
           });
         }
 
-        if (!code) return;
+        if (!code) {
+          // A DM has no server, so there are no standing rooms to hand out.
+          // Give a fresh pooled link instead of quietly doing nothing, which
+          // matches what /meet would have done in the same place.
+          const fresh = await takeMeeting();
+          const message = await safeReply(interaction, meetPost(fresh.meetingUri));
+          watchParticipants(message, fresh.name);
+
+          await rememberSpace({
+            name: fresh.name,
+            code: fresh.meetingCode,
+            uri: fresh.meetingUri,
+            channelId: interaction.channelId,
+            requestedBy: interaction.user?.username,
+          });
+          await logMeetCreated({
+            ...where(interaction),
+            command: `/${name}`,
+            meetingCode: fresh.meetingCode,
+            meetingUri: fresh.meetingUri,
+            note: "typed room requested in a DM; no rooms exist there, posted a pooled link",
+          });
+          return;
+        }
 
         const message = await safeReply(interaction, meetPost(`https://meet.google.com/${code}`));
 
@@ -732,11 +755,13 @@ client.on("interactionCreate", async (interaction) => {
 });
 
 /**
- * Adapts a plain-text command in a server into the shape handleCommand
- * expects, so `/meet` and a typed "meet" run the exact same code path.
+ * Adapts a plain-text command into the shape handleCommand expects, so `/meet`
+ * and a typed "meet" run the exact same code path.
  *
- * Only ever used in guilds: in a DM the slash command is just as easy to
- * type, and text commands in DMs are a spam risk with no upside.
+ * Works in DMs as well as servers, which matters for a user install: if you
+ * can DM the bot, you can type `rand` or `meet` there too. A DM has no
+ * server and so no standing rooms, which the text branch handles by posting
+ * a pooled link instead.
  */
 function textCommandFrom(message, parsed) {
   const options = parsed.options;
@@ -778,7 +803,10 @@ function textCommandFrom(message, parsed) {
 
 client.on("messageCreate", async (message) => {
   try {
-    if (message.author.bot || !message.guild) return; // servers only
+    // Works in DMs too, not just servers: as a user app you can DM the bot and
+    // type the same words. Standing rooms are per server, so a typed `meet` in
+    // a DM falls back to a fresh pooled link rather than doing nothing.
+    if (message.author.bot) return;
     const parsed = parseTextCommand(message.content);
     if (!parsed) return;
     await handleCommand(textCommandFrom(message, parsed));
