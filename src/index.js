@@ -18,7 +18,7 @@ import {
 import { initPool, takeMeeting } from "./meetingPool.js";
 import { addSchedule, loadSchedules, removeSchedule } from "./scheduleStore.js";
 import { rememberSpace, latestSpace } from "./spaceRegistry.js";
-import { PRELOADED_MEETS, UNCOUNTABLE } from "./preloadedMeets.js";
+import { PRELOADED_MEETS } from "./preloadedMeets.js";
 import { parseTextCommand } from "./textCommands.js";
 import { logMeetingCreated } from "./logger.js";
 
@@ -360,14 +360,10 @@ async function handleCommand(interaction) {
 
         const message = await safeReply(interaction, meetPost(`https://meet.google.com/${code}`));
 
-        // Live count, where the API will actually tell us. The Meet API only
-        // lets the owning account read a space, so this works for preloaded
-        // links that live on the same Google account as the OAuth token and
-        // logs a single line and stops for any that don't. UNCOUNTABLE lists
-        // the ones known to be unreachable so no doomed poll is even started.
-        if (!UNCOUNTABLE.includes(code)) {
-          watchParticipants(message, `spaces/${code}`);
-        }
+        // Live count. Every preloaded code was minted through this project's
+        // own token, so the Meet API lets us read the space and count who's
+        // in it. The watch logs one line and stops if a read ever fails.
+        watchParticipants(message, `spaces/${code}`);
         return;
       }
     }

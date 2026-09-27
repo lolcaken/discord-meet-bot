@@ -17,3 +17,6 @@ data/
 # Deploy tooling (holds host/port/user)
 deploy*.py
 deploy*.log
+
+# test output
+*-test.txt
