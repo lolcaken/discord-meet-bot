@@ -194,7 +194,19 @@ async function resolveSpace(interaction) {
   const code = interaction.options.getString("code");
   if (code) {
     const match = code.toLowerCase().match(/[a-z]{3}-[a-z]{4}-[a-z]{3}/)?.[0];
-    return match ? { name: `spaces/${match}`, code: match } : null;
+    if (!match) return null;
+    // The Meet API is inconsistent about identifiers: spaces.get accepts a
+    // meeting-code alias, but endActiveConference rejects it with
+    // PERMISSION_DENIED. So ask for the space by code, then use the canonical
+    // name it hands back. Without this, /end code:abc-defg-hij always failed.
+    try {
+      const space = await getSpace(`spaces/${match}`);
+      return { name: space.name, code: match, uri: space.meetingUri };
+    } catch (err) {
+      // A code we can't even read: unknown, or owned by another account.
+      console.error(`Couldn't resolve space for code ${match}:`, err.message);
+      return null;
+    }
   }
   return latestSpace(scopeOf(interaction), interaction.channelId);
 }
@@ -612,6 +624,24 @@ async function handleCommand(interaction) {
         // logs one line and stops if a read ever fails.
         watchParticipants(message, `spaces/${code}`);
 
+        // Registered too, so a bare /end in this channel ends the room people
+        // are actually sitting in rather than the last /meet link. The
+        // canonical name is needed here for the same reason resolveSpace
+        // resolves it: endActiveConference rejects a meeting-code alias.
+        let canonicalName = `spaces/${code}`;
+        try {
+          canonicalName = (await getSpace(`spaces/${code}`)).name;
+        } catch {
+          // Unreadable space: the link still posts, the count just won't work.
+        }
+        await rememberSpace(scopeOf(interaction), {
+          name: canonicalName,
+          code,
+          uri: `https://meet.google.com/${code}`,
+          channelId: interaction.channelId,
+          requestedBy: interaction.user?.username,
+        });
+
         await logRoomPosted({
           command: name,
           slot: slotKey,
@@ -791,6 +821,11 @@ async function handleCommand(interaction) {
         // worth shouting about.
         if (/no active conference/i.test(err.message)) {
           return void (await safeReply(interaction, `? Everyone had already left \`${space.code}\`.`));
+        }
+        if (/\(403\)|PERMISSION_DENIED/i.test(err.message)) {
+          return void (await safeReply(interaction,
+            `? Google refused to end \`${space.code}\` - this host doesn't own that meeting, so it can't be ended from here.`
+          ));
         }
         await logFailure({
           ...where(interaction),
