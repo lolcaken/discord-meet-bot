@@ -328,7 +328,33 @@ async function scanAndArm() {
   return armed;
 }
 
+/**
+ * Keeps the process alive while Discord is unreachable, and says so.
+ *
+ * Every long-lived timer below is registered inside `ready`, so if the gateway
+ * never connects - Cloudflare refusing, DNS failing, an outage - nothing holds
+ * the event loop open, discord.js's socket eventually gives up, and Node exits
+ * cleanly with code 0. That reads to a host like a normal shutdown and gets no
+ * automatic restart.
+ *
+ * This timer is created at module load, before any connection is attempted, so
+ * that case cannot happen. It is cleared the moment `ready` fires, since the
+ * schedule recheck then keeps the loop open on its own.
+ */
+let connected = false;
+const STARTUP_WATCHDOG_MS = 60_000;
+const watchdog = setInterval(() => {
+  if (connected) return;
+  console.warn(
+    "Still not connected to Discord. Staying up and retrying - check that this " +
+      "host can reach discord.com on port 443."
+  );
+}, STARTUP_WATCHDOG_MS);
+
 client.once("ready", async () => {
+  connected = true;
+  clearInterval(watchdog);
+
 
   console.log(`? Logged in as ${client.user.tag}`);
 
