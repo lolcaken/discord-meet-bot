@@ -24,6 +24,7 @@ const COLORS = { info: 0x5865f2, warn: 0xfaa61a, error: 0xed4245 };
 const GLYPH = { info: "•", warn: "!", error: "x" };
 
 let dirReady = false;
+let webhookBlips = 0;
 
 async function ensureLogDir() {
   if (dirReady) return;
@@ -142,7 +143,19 @@ async function postToWebhook(level, event, data) {
     }
     console.error(`Webhook log failed (${response.status}):`, await response.text().catch(() => ""));
   } catch (err) {
-    console.error("Webhook log failed:", err.message);
+    // Usually the host's own network, not the webhook: a refused connection to
+    // Cloudflare says the box can't reach Discord, which is worth naming rather
+    // than leaving as a bare "fetch failed".
+    const code = err?.code ?? err?.cause?.code ?? err?.errors?.[0]?.code ?? null;
+    console.error(
+      `Webhook log failed (${code ?? "network"}): ${String(err?.message ?? err).slice(0, 120)}`
+    );
+    webhookBlips++;
+    // The file log already has this line, so one console line per failure is
+    // enough; only speak up if it keeps happening.
+    if (webhookBlips === 5) {
+      console.error("Webhook has failed 5 times - is this host able to reach Discord at all?");
+    }
   }
 }
 

@@ -18,6 +18,7 @@ import {
 import { initPool, takeMeeting, poolSize } from "./meetingPool.js";
 import { addSchedule, loadAllSchedules, removeSchedule } from "./scheduleStore.js";
 import { rememberSpace, latestSpace } from "./spaceRegistry.js";
+import { withRetry } from "./retry.js";
 import { getOrCreateGuildRoom, countServicedGuilds } from "./guildRooms.js";
 import { migrateLegacyData } from "./dataPaths.js";
 import { writeGuildInfo, writeUserInfo, refreshAllGuildInfo } from "./scopeInfo.js";
@@ -94,15 +95,30 @@ const pendingTimers = new Set();
 client.on("error", (err) => console.error("Discord client error:", err));
 client.on("shardError", (err) => console.error("Discord shard error:", err));
 
-/** Best-effort reply helper: never throws, so a failed error-reply can't crash anything. */
+/**
+ * Best-effort reply helper: never throws, so a failed error-reply can't crash
+ * anything, and retries when the failure is a network blip rather than a
+ * rejected request. A refused connection to Discord's edge dropped replies
+ * outright; two short retries ride that out without the user seeing anything.
+ */
 async function safeReply(interaction, payload) {
   try {
-    if (interaction.deferred || interaction.replied) {
-      return await interaction.editReply(payload);
-    }
-    return await interaction.reply(payload);
+    return await withRetry("reply to Discord", async () => {
+      if (interaction.deferred || interaction.replied) {
+        return await interaction.editReply(payload);
+      }
+      return await interaction.reply(payload);
+    });
   } catch (err) {
-    console.error("Failed to send a reply to Discord:", err);
+    console.error("Failed to send a reply to Discord:", err?.code ?? err?.message ?? err);
+    await logFailure({
+      area: "discord.reply",
+      command: interaction?.commandName ?? null,
+      guildId: interaction?.guildId ?? null,
+      channelId: interaction?.channelId ?? null,
+      reason: String(err?.message ?? err).slice(0, 300),
+      summary: "Could not deliver a reply to Discord.",
+    });
     return undefined;
   }
 }

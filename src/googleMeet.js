@@ -1,4 +1,5 @@
 import { OAuth2Client } from "google-auth-library";
+import { withRetry } from "./retry.js";
 
 const {
   GOOGLE_CLIENT_ID,
@@ -56,47 +57,11 @@ export async function getSpace(name) {
 
 /**
  * Retries the network and server-side failures that resolve on their own.
- *
  * A connect timeout to Google is almost always a blip - a cold route, a
- * congested VPS, a dropped SYN - and the pool would otherwise be permanently one
- * link short until somebody happened to use /meet. These are the failures where
- * trying again is the correct response; a 403 or a 400 means the request itself
- * is wrong, so those still throw on the first attempt.
+ * congested VPS, a dropped SYN - and the pool would otherwise be permanently
+ * one link short until somebody happened to use /meet.
  */
-const TRANSIENT_CODES = new Set([408, 425, 429, 500, 502, 503, 504]);
-const MAX_ATTEMPTS = 3;
-const BASE_BACKOFF_MS = 1_000;
 const REQUEST_TIMEOUT_MS = 20_000;
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-/** Network-level errors (DNS, reset, connect timeout) have no HTTP status. */
-function isTransient(err) {
-  if (TRANSIENT_CODES.has(err?.status)) return true;
-  const code = err?.code ?? err?.cause?.code ?? "";
-  if (typeof code === "string" && /^(ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|UND_ERR_)/.test(code)) {
-    return true;
-  }
-  // undici surfaces a bare "fetch failed" with the real reason on .cause.
-  return err instanceof TypeError && /fetch failed/i.test(err.message);
-}
-
-async function withRetry(label, fn) {
-  let lastError;
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      lastError = err;
-      if (!isTransient(err) || attempt === MAX_ATTEMPTS) throw err;
-      // Linear-ish backoff: ~1s then ~2s, short enough that a user waiting on
-      // /meet doesn't notice, long enough not to hammer a struggling route.
-      await sleep(BASE_BACKOFF_MS * attempt);
-      console.warn(`${label} attempt ${attempt} failed (${err.code ?? err.message}); retrying`);
-    }
-  }
-  throw lastError;
-}
 
 /**
  * Creates a new Google Meet space with "Open" access, meaning anyone with

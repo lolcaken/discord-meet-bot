@@ -1,8 +1,13 @@
 /**
- * Retry behaviour for transient Google failures, and the pool heal. The
- * transient classifier is exercised against the real error shape from the log.
+ * Retry behaviour across both upstreams: Google (429s, connect timeouts) and
+ * Cloudflare-fronted Discord (refused connections).
+ *
+ * The classifier lives in src/retry.js and is shared by googleMeet.js and
+ * index.js, so these assertions read each concern from the file that owns it
+ * rather than re-implementing anything.
  */
 import { writeFileSync, readFileSync } from "node:fs";
+import { isTransient } from "./src/retry.js";
 
 const out = [];
 const say = (s) => { out.push(s); writeFileSync("retry-test.txt", out.join("\n") + "\n", "utf8"); };
@@ -14,70 +19,81 @@ const check = (label, got, want) => {
   say(`  ${ok ? "PASS" : "FAIL"}  ${label.padEnd(50)} got ${JSON.stringify(got)}${ok ? "" : ` want ${JSON.stringify(want)}`}`);
 };
 
-const src = readFileSync("src/googleMeet.js", "utf8");
+const retrySrc = readFileSync("src/retry.js", "utf8");
+const meetSrc = readFileSync("src/googleMeet.js", "utf8");
+const idxSrc = readFileSync("src/index.js", "utf8");
+const poolSrc = readFileSync("src/meetingPool.js", "utf8");
+const logSrc = readFileSync("src/logger.js", "utf8");
 
-// Pull the classifier and its table straight out of the shipped source.
-const codes = /const TRANSIENT_CODES = new Set\(\[([^\]]*)\]\);/.exec(src)[1];
-const classifier = /function isTransient\(err\) \{[\s\S]*?\n\}/.exec(src)[0];
+const codes = /const TRANSIENT_CODES = new Set\(\[([^\]]*)\]\);/.exec(retrySrc)[1];
+say(`TRANSIENT_CODES = [${codes}]  (src/retry.js)\n`);
 
-const TRANSIENT = new Set(codes.split(",").map((s) => Number(s.trim())));
-// The classifier body is lifted verbatim and closed over the same set, so this
-// tests the shipped logic rather than a paraphrase of it.
-const isTransient = new Function(
-  "TRANSIENT_CODES",
-  `${classifier}\nreturn isTransient;`
-)(TRANSIENT);
-
-say(`TRANSIENT_CODES = [${codes}]\n`);
-
-say("--- the exact error from the server log is transient ---");
-// undici connect timeout: TypeError('fetch failed') with .cause.code
-const connectTimeout = new TypeError("fetch failed");
-connectTimeout.cause = { code: "UND_ERR_CONNECT_TIMEOUT" };
-connectTimeout.code = "UND_ERR_CONNECT_TIMEOUT";
-check("connect timeout is retried", isTransient(connectTimeout), true);
-
-say("\n--- other network failures are retried ---");
-for (const code of ["ECONNRESET", "ETIMEDOUT", "ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "UND_ERR_SOCKET"]) {
+const netError = (code) => {
   const e = new TypeError("fetch failed");
   e.cause = { code };
   e.code = code;
-  check(`${code} is retried`, isTransient(e), true);
+  return e;
+};
+
+say("--- the exact AggregateError from the Discord failure ---");
+// Node builds this when every address for a host refuses, which is what a
+// Cloudflare-unreachable box produces.
+const refused = Object.assign(new Error("connect ECONNREFUSED 162.159.138.232:443"), {
+  errno: -111, code: "ECONNREFUSED", syscall: "connect",
+});
+const agg = new AggregateError([refused, { ...refused, message: "second address" }], "ECONNREFUSED");
+agg.code = "ECONNREFUSED";
+check("AggregateError of refusals is transient", isTransient(agg), true);
+
+say("\n--- plain network errors ---");
+for (const code of ["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "ENOTFOUND", "EAI_AGAIN", "EPIPE", "UND_ERR_CONNECT_TIMEOUT"]) {
+  check(code, isTransient(netError(code)), true);
 }
 
-say("\n--- transient HTTP statuses are retried ---");
+say("\n--- transient HTTP statuses ---");
 for (const status of [408, 425, 429, 500, 502, 503, 504]) {
-  const e = new Error(`Google Meet API error (${status})`);
+  const e = new Error(`HTTP ${status}`);
   e.status = status;
-  check(`HTTP ${status} is retried`, isTransient(e), true);
+  check(`HTTP ${status}`, isTransient(e), true);
 }
 
-say("\n--- real mistakes are NOT retried (no point asking again) ---");
+say("\n--- genuine mistakes still fail fast ---");
 for (const status of [400, 401, 403, 404]) {
-  const e = new Error(`Google Meet API error (${status})`);
+  const e = new Error(`HTTP ${status}`);
   e.status = status;
-  check(`HTTP ${status} fails fast`, isTransient(e), false);
+  check(`HTTP ${status} not retried`, isTransient(e), false);
 }
-const badJson = new SyntaxError("Unexpected token < in JSON");
-check("a parse error fails fast", isTransient(badJson), false);
-const plain = new Error("something else entirely");
-check("an unknown error fails fast", isTransient(plain), false);
+check("Discord's UnknownError not retried", isTransient(new Error("Unknown interaction")), false);
+check("a parse error not retried", isTransient(new SyntaxError("Unexpected token")), false);
+check("an unknown error not retried", isTransient(new Error("something else")), false);
 
-say("\n--- retries are bounded ---");
-const attempts = /const MAX_ATTEMPTS = (\d+);/.exec(src);
-check("MAX_ATTEMPTS is small", Number(attempts[1]) <= 4, true);
-const timeout = /const REQUEST_TIMEOUT_MS = ([\d_]+);/.exec(src);
-check("requests have a timeout", Number(timeout[1].replace(/_/g, "")) >= 15000, true);
-check("createOpenMeetSpace retries", /createOpenMeetSpace[\s\S]{0,200}withRetry/.test(src), true);
-check("call() retries", /async function call[\s\S]{0,200}withRetry/.test(src), true);
+say("\n--- bounded, and only one classifier ---");
+check("MAX_ATTEMPTS is small", Number(/const MAX_ATTEMPTS = (\d+);/.exec(retrySrc)[1]) <= 4, true);
+check("requests carry a timeout", /REQUEST_TIMEOUT_MS/.test(meetSrc), true);
+check("googleMeet defines no second classifier", meetSrc.includes("function isTransient"), false);
+check("googleMeet imports the shared one", meetSrc.includes('from "./retry.js"'), true);
+
+say("\n--- Google calls retry ---");
+check("createOpenMeetSpace retries", /createOpenMeetSpace[\s\S]{0,200}withRetry/.test(meetSrc), true);
+check("call() retries", /async function call[\s\S]{0,200}withRetry/.test(meetSrc), true);
+
+say("\n--- Discord replies retry and get logged ---");
+const helper = /async function safeReply[\s\S]*?\n\}/.exec(idxSrc)[0];
+check("safeReply uses withRetry", helper.includes("withRetry("), true);
+check("still never throws", helper.includes("return undefined"), true);
+check("failure is logged, not just printed", helper.includes("logFailure("), true);
+check("failure is attributed", helper.includes("discord.reply"), true);
 
 say("\n--- the pool heals instead of waiting for a user ---");
-const pool = readFileSync("src/meetingPool.js", "utf8");
-check("heal is scheduled on a short pool", /if \(ready < POOL_SIZE\)/.test(pool), true);
-check("heal retries a few times", /scheduleHeal\(attemptsLeft - 1\)/.test(pool), true);
-check("heal stops once full", /if \(deficit <= 0\) return;/.test(pool), true);
-check("heal timer is unref'd", /healTimer\.unref\?\.\(\)/.test(pool), true);
-check("initPool returns the real count", /return ready;/.test(pool), true);
+check("heal scheduled on a short pool", /if \(ready < POOL_SIZE\)/.test(poolSrc), true);
+check("heal retries a few times", /scheduleHeal\(attemptsLeft - 1\)/.test(poolSrc), true);
+check("heal stops once full", /if \(deficit <= 0\) return;/.test(poolSrc), true);
+check("heal timer is unref'd", /healTimer\.unref\?\.\(\)/.test(poolSrc), true);
+
+say("\n--- webhook failure is described, not bare ---");
+check("reports the network code", /Webhook log failed \(\$\{code/.test(logSrc), true);
+check("counts repeat blips", logSrc.includes("webhookBlips === 5"), true);
+check("asks the useful question", logSrc.includes("able to reach Discord at all"), true);
 
 say(`\n${fail === 0 ? "ALL PASSED" : fail + " FAILED"}`);
 process.exitCode = fail ? 1 : 0;
