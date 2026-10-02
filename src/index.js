@@ -18,7 +18,7 @@ import {
 import { initPool, takeMeeting, poolSize } from "./meetingPool.js";
 import { addSchedule, loadAllSchedules, removeSchedule } from "./scheduleStore.js";
 import { rememberSpace, latestSpace } from "./spaceRegistry.js";
-import { withRetry } from "./retry.js";
+import { withRetry, isTransient } from "./retry.js";
 import { getOrCreateGuildRoom, countServicedGuilds } from "./guildRooms.js";
 import { migrateLegacyData } from "./dataPaths.js";
 import { writeGuildInfo, writeUserInfo, refreshAllGuildInfo } from "./scopeInfo.js";
@@ -61,12 +61,38 @@ const GUILD_ONLY = new Set(["schedule"]);
 // rejections by default, and EventEmitter 'error' events with no listener
 // throw). Logging and continuing keeps the bot alive through transient
 // issues instead of needing a manual restart every time.
-process.on("unhandledRejection", (err) => {
-  console.error("Unhandled promise rejection (bot is still running):", err);
-});
-process.on("uncaughtException", (err) => {
-  console.error("Uncaught exception (bot is still running):", err);
-});
+process.on("unhandledRejection", reportCrash);
+process.on("uncaughtException", reportCrash);
+
+/**
+ * A host-level outage produces the same connection error once per gateway
+ * reconnect, which is dozens of identical stack traces an hour. During an
+ * outage the useful message is "this box cannot reach Discord", said once
+ * and then throttled — not the same 40-line AggregateError every 30 seconds.
+ */
+let lastOutageNotice = 0;
+const OUTAGE_NOTICE_MS = 10 * 60 * 1000;
+
+function reportCrash(err) {
+  const isConnection = isTransient(err);
+
+  if (isConnection) {
+    const now = Date.now();
+    if (now - lastOutageNotice > OUTAGE_NOTICE_MS) {
+      lastOutageNotice = now;
+      const code = err?.code ?? err?.errors?.[0]?.code ?? "network";
+      console.error(
+        `[network] Cannot reach Discord (${code}). The bot stays up and will ` +
+          `reconnect. Everything else keeps working; only Discord commands ` +
+          `are unavailable. Further identical errors will be quiet for 10 min.`
+      );
+    }
+    return;
+  }
+
+  lastOutageNotice = 0; // a real fault deserves to be seen
+  console.error("Unhandled error (bot is still running):", err);
+}
 
 const GOOGLE_MEET_LOGO_URL =
   "https://fonts.gstatic.com/s/i/productlogos/meet_2020q4/v6/web-96dp/logo_meet_2020q4_color_2x_web_96dp.png";
@@ -343,12 +369,18 @@ async function scanAndArm() {
  */
 let connected = false;
 const STARTUP_WATCHDOG_MS = 60_000;
+let watchdogNotices = 0;
 const watchdog = setInterval(() => {
   if (connected) return;
-  console.warn(
-    "Still not connected to Discord. Staying up and retrying - check that this " +
-      "host can reach discord.com on port 443."
-  );
+  watchdogNotices++;
+  // Once a minute at first, then every ten. A host-wide outage lasts hours,
+  // and sixty identical lines an hour helps nobody.
+  if (watchdogNotices === 1 || watchdogNotices % 10 === 0) {
+    console.warn(
+      "Still not connected to Discord. Staying up and retrying - check that this " +
+        "host can reach discord.com on port 443."
+    );
+  }
 }, STARTUP_WATCHDOG_MS);
 
 client.once("ready", async () => {
