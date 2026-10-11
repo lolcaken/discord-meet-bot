@@ -19,7 +19,7 @@ import { initPool, takeMeeting, poolSize } from "./meetingPool.js";
 import { addSchedule, loadAllSchedules, removeSchedule } from "./scheduleStore.js";
 import { rememberSpace, latestSpace } from "./spaceRegistry.js";
 import { withRetry, isTransient } from "./retry.js";
-import { getOrCreateGuildRoom, countServicedGuilds } from "./guildRooms.js";
+import { countServicedGuilds, resolveGuildRoom, seedGuildRooms } from "./guildRooms.js";
 import { migrateLegacyData } from "./dataPaths.js";
 import { writeGuildInfo, writeUserInfo, refreshAllGuildInfo } from "./scopeInfo.js";
 import { refreshAllReports } from "./scopeReports.js";
@@ -413,6 +413,17 @@ client.once("ready", async () => {
     console.log(`📦 Migrated to per-server data folders: ${migrated.join("; ")}`);
   }
 
+  // Put the main guild's four links in its rooms.json so they're editable
+  // there. Existing entries are left alone, so a link you changed by hand is
+  // never reverted by a restart.
+  let seeded = 0;
+  if (MAIN_GUILD_ID) {
+    seeded = await seedGuildRooms(MAIN_GUILD_ID, PRELOADED_MEETS);
+    if (seeded) {
+      console.log(`🚪 Wrote ${seeded} standing room(s) into data/guilds/${MAIN_GUILD_ID}/rooms.json`);
+    }
+  }
+
   const pending = await scanAndArm();
   const serviced = await countServicedGuilds();
 
@@ -519,14 +530,17 @@ function secondsLeft(wait) {
 /**
  * The standing-room code for a slot, per server.
  *
- * The main guild's four codes are fixed and are never regenerated. Any other
- * server gets its own, minted from the same Google account the first time that
- * slot is used, so the Meet API can read it and the live count works.
+ * `data/guilds/<guildId>/rooms.json` decides, so you can change a link by
+ * editing that file - the next `meet` picks it up with no restart. The main
+ * guild's file is seeded from PRELOADED_MEETS on boot, so it starts out with
+ * those four codes and keeps anything you change afterwards. Other servers
+ * have no seed, so their slots are minted on first use. A DM has no server
+ * and therefore no rooms; it gets a pooled link instead.
  */
 async function roomCodeFor(guildId, slot) {
-  if (isMainGuild(guildId)) return PRELOADED_MEETS[slot] ?? null;
   if (!guildId) return null; // DMs have no rooms; they use /meet and /rand
-  return getOrCreateGuildRoom(guildId, slot);
+  const seed = isMainGuild(guildId) ? PRELOADED_MEETS[slot] : undefined;
+  return resolveGuildRoom(guildId, slot, { seed });
 }
 
 /**

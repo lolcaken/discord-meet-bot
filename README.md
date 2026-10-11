@@ -81,12 +81,34 @@ can read them and the live 👤 count works there too.
 | `/end` | yes | **no** | no |
 
 Rooms are created one at a time, on demand: a server that only ever types `meet`
-costs exactly one space against Google's create quota, not four. They're remembered in
-`data/guildRooms.json`. If a mint fails — a rate limit, say — the bot posts a pooled link
-instead so nobody is left without a way in.
+costs exactly one space against Google's create quota, not four. If a mint fails — a
+rate limit, say — the bot posts a pooled link instead so nobody is left without a way
+in.
 
-The main guild's four codes are never regenerated, so they stay exactly as configured in
-`src/preloadedMeets.js`.
+### Changing a standing room
+
+`data/guilds/<guildId>/rooms.json` is the source of truth for every server's rooms,
+main guild included:
+
+```json
+{
+  "1": "ggv-nove-xkr",
+  "2": "dbp-ttaz-vuc",
+  "3": "wqw-ajqo-cnt",
+  "4": "fxf-ixhq-ucm"
+}
+```
+
+Slot `1` is what a typed `meet` (or `cd`) posts; `2`–`4` are `meet2`–`meet4`. **Edit the
+file and it takes effect on the next command — no redeploy and no restart**, because
+the bot reads it rather than caching a copy.
+
+The main guild's file is seeded from `src/preloadedMeets.js` on boot so it starts with
+those four codes, but **only for slots that aren't already set** — anything you change
+by hand survives restarts. Other servers have no seed: their slots are minted on first
+use and written to the same file, so you can swap them afterwards too. A deleted slot
+falls back to the seeded code, and a corrupt file is treated as "nothing set" rather
+than handing back nonsense.
 
 Slash commands still *appear* in every server, because Discord has no per-guild command
 visibility. Reserved ones answer with a short refusal instead.

@@ -51,14 +51,16 @@ const codes = [...preloaded.matchAll(/^\s*\d:\s*"([a-z0-9-]+)"/gm)].map((m) => m
 say(`\npreloaded codes in source: ${codes.length} (${codes.join(", ")})`);
 check("main guild has 4 rooms", codes.length, 4);
 
-const roomBlock = /async function roomCodeFor[\s\S]*?\n}/.exec(src);
-say("\nroomCodeFor returns PRELOADED_MEETS for the main guild: " +
-  roomBlock[0].includes("PRELOADED_MEETS[slot]"));
-say("roomCodeFor generates for other guilds: " +
-  roomBlock[0].includes("getOrCreateGuildRoom"));
-say("roomCodeFor refuses in DMs: " + roomBlock[0].includes("if (!guildId) return null"));
-check("main guild uses the fixed map",
-  roomBlock[0].includes("isMainGuild(guildId)) return PRELOADED_MEETS[slot] ?? null"), true);
+const roomBlock = /async function roomCodeFor[\s\S]*?\n}/.exec(src)[0];
+say("\nroomCodeFor reads the data folder for every guild: " +
+  roomBlock.includes("resolveGuildRoom"));
+say("roomCodeFor seeds the main guild only: " +
+  /isMainGuild\(guildId\) \? PRELOADED_MEETS\[slot\]/.test(roomBlock));
+say("roomCodeFor refuses in DMs: " + roomBlock.includes("if (!guildId) return null"));
+check("main guild's file wins over the seed",
+  roomBlock.includes("seed = isMainGuild(guildId)"), true);
+check("rooms come from rooms.json, not the source map",
+  roomBlock.includes("resolveGuildRoom(guildId, slot"), true);
 
 // ---- storage, exercised on a throwaway DATA_DIR (no Google calls) ----
 say("\n--- per-server room storage ---");
