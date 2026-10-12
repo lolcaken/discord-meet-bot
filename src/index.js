@@ -213,14 +213,25 @@ const NO_MEETING =
  * The one and only shape a posted meeting takes: an @everyone ping, a nudge,
  * and the bare link. Every path — /meet, /rand and the preloaded links — goes
  * through here so they can't drift apart.
+ *
+ * `label` adds one quiet line above the link. It exists so `last` can mark
+ * itself as a repost without inventing a second message shape; everything
+ * else omits it and gets the plain two-liner.
  */
-const meetPost = (uri) => ({
-  content: `@everyone join meet!!\n${uri}`,
+const meetPost = (uri, label) => ({
+  content: `@everyone join meet!!${label ? `\n${label}` : ""}\n${uri}`,
   allowedMentions: { parse: ["everyone"] },
 });
 
 /** How many recorded spaces `last` will check before giving up. */
 const LAST_SCAN_LIMIT = 5;
+
+/**
+ * The marker `last` puts above the link. Just a word between dashes, sitting
+ * where a title would sit — quiet enough that the ping and the link still lead,
+ * and plain text, so it needs no glyph to read as deliberate.
+ */
+const LATEST_LABEL = "- latest -";
 
 /**
  * Finds the most recent meeting that actually has people in it.
@@ -282,9 +293,10 @@ async function handleLast(interaction) {
 
     if (count === 0) continue;
 
-    // Posted exactly like a meet, then handed to the same live counter, so the
-    // number keeps ticking instead of freezing at whatever it was when found.
-    const message = await safeReply(interaction, meetPost(entry.uri ?? space.meetingUri));
+    // The same post every other path uses, plus the one quiet line that marks
+    // this as a repost, then the shared live counter so the headcount ticks
+    // instead of freezing at whatever it was when found.
+    const message = await safeReply(interaction, meetPost(entry.uri ?? space.meetingUri, LATEST_LABEL));
     watchParticipants(message, entry.name);
 
     await logEvent("info", "last.posted", {

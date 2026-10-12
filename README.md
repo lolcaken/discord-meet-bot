@@ -57,8 +57,9 @@ instead.
 ### `last`
 
 Type `last` in a server and it finds the most recent meeting that actually has people in
-it, then posts it — an `@everyone` ping and the link, exactly like a `meet` post, with the
-same live `👤` headcount underneath that keeps ticking.
+it, then posts it — the same `@everyone` ping and link as a `meet` post, with one quiet
+`- latest -` line above the link to show it's a repost, and the same live `👤` headcount
+underneath that keeps ticking.
 
 It looks back through recent meetings rather than only the newest one, so if someone
 fires a second `/meet` that nobody joins, `last` skips past it to the call people are

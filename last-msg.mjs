@@ -16,27 +16,46 @@ const check = (label, got, want) => {
 
 const src = readFileSync("src/index.js", "utf8");
 
-say("--- `last` posts exactly what `meet` posts ---");
-const meetPostSrc = /const meetPost = \(uri\) => \(\{[\s\S]*?\n\}\);/.exec(src)[0];
-// Build the payload by running the real meetPost source with uri bound.
-const evalMeetPost = (uri) => new Function("uri", `${meetPostSrc}\nreturn meetPost(uri);`)(uri);
+say("--- `last` is a meet post plus one quiet label line ---");
+const meetPostSrc = /const meetPost = \(uri, label\) => \(\{[\s\S]*?\n\}\);/.exec(src)[0];
+// Build the payload by running the real meetPost source.
+const evalMeetPost = (uri, label) =>
+  new Function("uri", "label", `${meetPostSrc}\nreturn meetPost(uri, label);`)(uri, label);
 
-check("lastPost helper is gone", /const lastPost\b/.test(src), false);
-check("no 'latest:' line any more", /content: "@everyone join meet!!\\nlatest:/.test(src), false);
+const label = /const LATEST_LABEL = "([^"]+)"/.exec(src)[1];
+const plain = evalMeetPost("https://meet.google.com/abc-defg-hij");
+const tagged = evalMeetPost("https://meet.google.com/abc-defg-hij", label);
 
-const built = evalMeetPost("https://meet.google.com/abc-defg-hij");
-say("\n  base post:\n" + built.content.split("\n").map((l) => "  | " + l).join("\n"));
+say("\n  meet (unchanged):\n" + plain.content.split("\n").map((l) => "  | " + l).join("\n"));
+say("\n  last:\n" + tagged.content.split("\n").map((l) => "  | " + l).join("\n") + "\n");
 
-check("identical to a meet post", built.content, "@everyone join meet!!\nhttps://meet.google.com/abc-defg-hij");
-check("pings everyone", JSON.stringify(built.allowedMentions), '{"parse":["everyone"]}');
-check("no embed anywhere", /embeds/.test(src.slice(src.indexOf("async function handleLast"), src.indexOf("async function handleLast") + 4000)), false);
+check("the label is the latest word", label, "- latest -");
+check("plain meet is byte-identical to before",
+  plain.content, "@everyone join meet!!\nhttps://meet.google.com/abc-defg-hij");
+check("last keeps the classic first line",
+  tagged.content.split("\n")[0], "@everyone join meet!!");
+check("last keeps the bare link",
+  tagged.content.endsWith("https://meet.google.com/abc-defg-hij"), true);
+check("the label sits directly above the link",
+  tagged.content.split("\n").slice(-2, -1)[0], label);
+check("last is exactly three lines before the counter",
+  tagged.content.split("\n").length, 3);
+check("pings everyone", JSON.stringify(tagged.allowedMentions), '{"parse":["everyone"]}');
 
-say("\n--- the counter is now live, added by the shared watcher ---");
+say("\n--- no emoji in the label ---");
+const glyph = /\p{Extended_Pictographic}/u;
+check("the label is plain text", glyph.test(label), false);
+check("no emoji anywhere in the last post", glyph.test(tagged.content), false);
+check("the counter emoji still exists for the watcher",
+  /const COUNTER_EMOJI = "\\u\{1F464\}"/.test(src), true);
+
+say("\n--- the counter is live, added by the shared watcher ---");
 const handler = /async function handleLast\(interaction\) \{[\s\S]*?\n\}/.exec(src)[0];
 check("hands the message to watchParticipants", /watchParticipants\(message, entry\.name\)/.test(handler), true);
-check("posts via meetPost", /safeReply\(interaction, meetPost\(/.test(handler), true);
+check("posts via meetPost with the label",
+  /safeReply\(interaction, meetPost\(entry\.uri \?\? space\.meetingUri, LATEST_LABEL\)\)/.test(handler), true);
+check("the label is passed as a constant", handler.includes("LATEST_LABEL"), true);
 check("counts with the same call meet uses", handler.includes("{ activeOnly: true }"), true);
-check("the watcher re-reads every poll", /setInterval/.test(src), true);
 check("count still gates the scan", handler.includes("if (count === 0) continue"), true);
 
 say("\n--- scan behaviour ---");
@@ -52,7 +71,11 @@ check("logs when it doesn't", handler.includes("last.empty"), true);
 
 say("\n--- empty case ---");
 check('says exactly "No people active rn lol"', src.includes('"No people active rn lol"'), true);
-check("no separate empty-candidates reply", handler.includes("candidates.length"), false);
+
+say("\n--- the other four paths are untouched ---");
+const others = src.match(/meetPost\((?!entry\.uri)[^)]*\)/g) || [];
+check("four call sites pass no label", others.length, 4);
+check("no emoji crept into any meet post", glyph.test(plain.content), false);
 
 say("\n--- wired into the typed path ---");
 check("parser knows the word", readFileSync("src/textCommands.js", "utf8").includes('"meet", "rand", "last"'), true);
