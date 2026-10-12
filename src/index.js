@@ -219,17 +219,6 @@ const meetPost = (uri) => ({
   allowedMentions: { parse: ["everyone"] },
 });
 
-/**
- * `last`: the same shape as a meet post, marked as the latest and carrying the
- * live headcount. Deliberately one-shot rather than watched — a watch would
- * poll every 15 seconds for as long as it lived, which is a cheap way for one
- * person to burn the API quota for everyone.
- */
-const lastPost = (uri, count) => ({
-  content: `@everyone join meet!!\nlatest:\n${uri}\n${COUNTER_EMOJI} ${count}`,
-  allowedMentions: { parse: ["everyone"] },
-});
-
 /** How many recorded spaces `last` will check before giving up. */
 const LAST_SCAN_LIMIT = 5;
 
@@ -263,11 +252,6 @@ async function handleLast(interaction) {
   const scope = scopeOf(interaction);
   const candidates = await recentSpaces(scope, interaction.channelId, LAST_SCAN_LIMIT);
 
-  if (!candidates.length) {
-    await safeReply(interaction, "No people active rn lol");
-    return;
-  }
-
   let checked = 0;
   let unreadable = 0;
 
@@ -298,7 +282,11 @@ async function handleLast(interaction) {
 
     if (count === 0) continue;
 
-    await safeReply(interaction, lastPost(entry.uri ?? space.meetingUri, count));
+    // Posted exactly like a meet, then handed to the same live counter, so the
+    // number keeps ticking instead of freezing at whatever it was when found.
+    const message = await safeReply(interaction, meetPost(entry.uri ?? space.meetingUri));
+    watchParticipants(message, entry.name);
+
     await logEvent("info", "last.posted", {
       ...where(interaction),
       meetingCode: entry.code ?? null,

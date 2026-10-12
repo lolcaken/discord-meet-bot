@@ -57,16 +57,15 @@ instead.
 ### `last`
 
 Type `last` in a server and it finds the most recent meeting that actually has people in
-it, then re-posts it with the live headcount and an `@everyone` ping — same shape as a
-`meet` post, marked `latest:`.
+it, then posts it — an `@everyone` ping and the link, exactly like a `meet` post, with the
+same live `👤` headcount underneath that keeps ticking.
 
 It looks back through recent meetings rather than only the newest one, so if someone
 fires a second `/meet` that nobody joins, `last` skips past it to the call people are
 actually sitting in. If nobody's in any meeting, it says so.
 
 `last` is **servers only** (there's no server to search in a DM) and **type-only**
-(no `/last`). It checks up to 5 recent meetings, and never mints a new link or spends
-your API quota.
+(no `/last`). It checks up to 5 recent meetings, and never mints a new link.
 
 ### Live participant count
 
