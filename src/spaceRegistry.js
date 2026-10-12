@@ -44,3 +44,19 @@ export async function latestSpace(scope, channelId) {
   }
   return entries[0] ?? null;
 }
+
+/**
+ * Recent spaces, newest first, for the `last` command to search.
+ *
+ * Spaces from the channel the command was typed in come first, then the rest
+ * of the server, so the meeting people are actually talking about wins over a
+ * newer one that happens to have been posted elsewhere.
+ */
+export async function recentSpaces(scope, channelId, limit = 5) {
+  const entries = await readJson(file(scope), []);
+  if (!Array.isArray(entries) || !entries.length) return [];
+
+  const inChannel = channelId ? entries.filter((e) => e?.channelId === channelId) : [];
+  const elsewhere = entries.filter((e) => !inChannel.includes(e));
+  return [...inChannel, ...elsewhere].slice(0, limit);
+}

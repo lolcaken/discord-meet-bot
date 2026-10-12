@@ -17,7 +17,7 @@ import {
 } from "./googleMeet.js";
 import { initPool, takeMeeting, poolSize } from "./meetingPool.js";
 import { addSchedule, loadAllSchedules, removeSchedule } from "./scheduleStore.js";
-import { rememberSpace, latestSpace } from "./spaceRegistry.js";
+import { rememberSpace, latestSpace, recentSpaces } from "./spaceRegistry.js";
 import { withRetry, isTransient } from "./retry.js";
 import { countServicedGuilds, resolveGuildRoom, seedGuildRooms } from "./guildRooms.js";
 import { migrateLegacyData } from "./dataPaths.js";
@@ -35,6 +35,7 @@ import {
   logBlocked,
   logDenied,
   logFailure,
+  logEvent,
 } from "./logger.js";
 
 if (!process.env.DISCORD_TOKEN) {
@@ -217,6 +218,105 @@ const meetPost = (uri) => ({
   content: `@everyone join meet!!\n${uri}`,
   allowedMentions: { parse: ["everyone"] },
 });
+
+/**
+ * `last`: the same shape as a meet post, marked as the latest and carrying the
+ * live headcount. Deliberately one-shot rather than watched — a watch would
+ * poll every 15 seconds for as long as it lived, which is a cheap way for one
+ * person to burn the API quota for everyone.
+ */
+const lastPost = (uri, count) => ({
+  content: `@everyone join meet!!\nlatest:\n${uri}\n${COUNTER_EMOJI} ${count}`,
+  allowedMentions: { parse: ["everyone"] },
+});
+
+/** How many recorded spaces `last` will check before giving up. */
+const LAST_SCAN_LIMIT = 5;
+
+/**
+ * Finds the most recent meeting that actually has people in it.
+ *
+ * Scans backwards through the recorded spaces rather than only looking at the
+ * newest: a second /meet that nobody joined would otherwise hide the call
+ * several people are still sitting in, which is the exact situation `last`
+ * exists for.
+ */
+async function handleLast(interaction) {
+  // Typed-only and server-only: a DM has no server to search, so nothing to do.
+  if (!interaction.guildId) return;
+
+  const wait = cooldownRemaining("preloaded", interaction.channelId);
+  if (wait > 0) {
+    await logBlocked({
+      command: "last",
+      guildId: interaction.guildId,
+      channelId: interaction.channelId,
+      user: interaction.user?.username,
+      gate: "preloaded",
+      retryInSeconds: Number(wait.toFixed(1)),
+    });
+    await safeReply(interaction, `${secondsLeft(wait)} left`);
+    return;
+  }
+  markPosted("preloaded", interaction.channelId);
+
+  const scope = scopeOf(interaction);
+  const candidates = await recentSpaces(scope, interaction.channelId, LAST_SCAN_LIMIT);
+
+  if (!candidates.length) {
+    await safeReply(interaction, "No people active rn lol");
+    return;
+  }
+
+  let checked = 0;
+  let unreadable = 0;
+
+  for (const entry of candidates) {
+    checked++;
+    let space;
+    try {
+      space = await getSpace(entry.name);
+    } catch {
+      // Belongs to another account or has gone; not a reason to stop.
+      unreadable++;
+      continue;
+    }
+
+    // No active conference means the call ended, or never started.
+    if (!space?.activeConference) continue;
+
+    let count = 0;
+    try {
+      const { participants = [] } = await listParticipants(
+        space.activeConference.conferenceRecord,
+        { activeOnly: true }
+      );
+      count = participants.length;
+    } catch {
+      continue; // couldn't count it; treat as not worth reporting
+    }
+
+    if (count === 0) continue;
+
+    await safeReply(interaction, lastPost(entry.uri ?? space.meetingUri, count));
+    await logEvent("info", "last.posted", {
+      ...where(interaction),
+      meetingCode: entry.code ?? null,
+      peopleCount: count,
+      checked,
+      unreadable,
+    });
+    return;
+  }
+
+  await safeReply(interaction, "No people active rn lol");
+  await logEvent("info", "last.empty", {
+    ...where(interaction),
+    checked,
+    unreadable,
+    summary: `Checked ${checked} recorded space(s), nobody is in one.`,
+  });
+}
 
 /** Google API errors are JSON blobs; show the part a human can act on. */
 function apiHint(err) {
@@ -635,6 +735,15 @@ async function handleCommand(interaction) {
     // `rand` continues on to its own branch.
     if (interaction.isTextCommand) {
       const name = interaction.commandName ?? "";
+
+      // `last` re-posts whichever meeting currently has people in it, for the
+      // "I missed the link" case. Handled before the meet regex and before
+      // anything that could create a room, so it never mints or spends quota.
+      if (name === "last") {
+        await handleLast(interaction);
+        return;
+      }
+
       // Matched on the word, not merely "is it text": a typed `rand` is also
       // a text command, and it must fall through to its own random branch.
       const slot = /^meet(?:([2-9]|[1-9][0-9]+))?$/.exec(name);

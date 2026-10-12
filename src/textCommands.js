@@ -1,12 +1,16 @@
 ﻿/**
- * Plain-text commands for servers: `cd` (or `meet`), `meet2`…`meetN`, and
- * `rand`.
+ * Plain-text commands for servers: `cd` (or `meet`), `meet2`…`meetN`, `rand`
+ * and `last`.
  *
  * `cd` is the short alias for `meet` and resolves to the same preloaded link
  * 1 — the default standing room. There's deliberately no typed `meet1`:
  * typing that does nothing, because `meet` already is that one. The
  * preloaded links are text-only too: there's no /meet1 slash command, so
  * they don't clutter the command palette. `/meet` stays random from the pool.
+ *
+ * `last` re-posts whichever meeting currently has people in it, for when
+ * someone missed the link. It is typed-only and servers-only; the handler
+ * decides that, since parsing here is context-free.
  *
  * Returns null for anything that isn't one of those exact words, which is
  * what keeps ordinary conversation safe: "lets meet tomorrow" and
@@ -23,6 +27,8 @@ const ALIASES = { cd: "meet" };
 // PRELOADED_MEETS, which keeps this from needing to know the slot count.
 const PRELOADED = /^meet([2-9]|[1-9][0-9]+)$/;
 
+const KNOWN = new Set(["meet", "rand", "last"]);
+
 export function parseTextCommand(content) {
   if (typeof content !== "string") return null;
 
@@ -34,7 +40,7 @@ export function parseTextCommand(content) {
   // command word inside a sentence never fires.
   const word = text.toLowerCase();
   const name = ALIASES[word] ?? word;
-  if (name !== "meet" && name !== "rand" && !PRELOADED.test(name)) return null;
+  if (!KNOWN.has(name) && !PRELOADED.test(name)) return null;
 
   return { name, options: { name } };
 }

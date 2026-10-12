@@ -45,6 +45,7 @@ instead.
 | `cd` or `meet` | — | The default standing room |
 | `meet2` `meet3` `meet4` | — | The other standing rooms |
 | `rand` | `/rand` | A brand new link from the pool |
+| `last` | — | Re-posts the latest meeting that has people in it |
 | — | `/meet` | A brand new link, plus an `@everyone` ping |
 | — | `/schedule minutes:30 title:"Standup"` | Posts a fresh link later, up to 7 days out |
 | — | `/end` | Ends the live call, dropping everyone still in it |
@@ -52,6 +53,20 @@ instead.
 > **`meet` and `/meet` are deliberately different.** Typing `meet` gives a permanent
 > standing room that always exists. `/meet` always mints a brand new link. There is no
 > `/meet1` — the standing rooms are type-only so they don't clutter the command palette.
+
+### `last`
+
+Type `last` in a server and it finds the most recent meeting that actually has people in
+it, then re-posts it with the live headcount and an `@everyone` ping — same shape as a
+`meet` post, marked `latest:`.
+
+It looks back through recent meetings rather than only the newest one, so if someone
+fires a second `/meet` that nobody joins, `last` skips past it to the call people are
+actually sitting in. If nobody's in any meeting, it says so.
+
+`last` is **servers only** (there's no server to search in a DM) and **type-only**
+(no `/last`). It checks up to 5 recent meetings, and never mints a new link or spends
+your API quota.
 
 ### Live participant count
 
