@@ -284,6 +284,25 @@ npm start
 `npm run auth` prints a `GOOGLE_REFRESH_TOKEN=…` line — paste it into `.env`. No Google
 Workspace needed; a personal Gmail account works.
 
+### Registering the slash commands
+
+Discord keeps its own list of a bot's commands, separate from the code that handles
+them, so they have to be pushed to Discord — `npm run deploy` does that. It registers
+to your main guild (instant) and globally (which can take up to an hour to propagate),
+so the commands are usable straight away in your own server and everywhere else
+eventually.
+
+The deploy only calls Discord when the command list has actually changed, so running
+it on every start is cheap. That makes it safe to put in the host's startup command,
+which is how a pushed change becomes live on the next restart:
+
+```bash
+if [ -f /home/container/src/deploy-commands.js ]; then /usr/local/bin/node /home/container/src/deploy-commands.js > /dev/null 2>&1 || true; fi
+```
+
+The `|| true` matters: a failed registration must never stop the bot from starting.
+Every typed command works whether or not the slash commands exist.
+
 ### Optional config
 
 | Variable | Default | Notes |
