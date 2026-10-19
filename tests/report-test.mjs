@@ -1,4 +1,4 @@
-/**
+﻿/**
  * The per-folder JSON: server identity, derived stats, and errorlog.json.
  * Runs against a throwaway DATA_DIR.
  */
@@ -12,7 +12,7 @@ process.env.DATA_DIR = tmp;
 process.env.DISCORD_LOG_WEBHOOK_URL = "";
 
 const out = [];
-const say = (s) => { out.push(s); writeFileSync("report-test.txt", out.join("\n") + "\n", "utf8"); };
+const say = (s) => { out.push(s); writeFileSync(new URL("report-test.txt", import.meta.url), out.join("\n") + "\n", "utf8"); };
 
 let fail = 0;
 const check = (label, got, want) => {
@@ -25,9 +25,9 @@ const G = "111111111111111111";
 const scope = { guildId: G };
 mkdirSync(path.join(tmp, "guilds", G), { recursive: true });
 
-const { writeGuildInfo, readScopeInfo, describeGuild } = await import("./src/scopeInfo.js");
+const { writeGuildInfo, readScopeInfo, describeGuild } = await import("../src/scopeInfo.js");
 const { buildMeetingStats, buildScheduleStats, writeScopeReports, refreshAllReports } =
-  await import("./src/scopeReports.js");
+  await import("../src/scopeReports.js");
 
 say("--- server.json ---");
 // A stand-in for the gateway's guild object, with the fields we actually read.
@@ -98,7 +98,7 @@ check("one scope refreshed", summary.scopes, 1);
 check("two files across it", summary.files, 2);
 
 say("\n--- errorlog.json ---");
-const { logEvent, logFailure, logBlocked } = await import("./src/logger.js");
+const { logEvent, logFailure, logBlocked } = await import("../src/logger.js");
 const errFile = path.join("logs", "errorlog.json");
 rmSync(errFile, { force: true });
 const before = existsSync("logs/activity.log") ? readFileSync("logs/activity.log", "utf8") : "";

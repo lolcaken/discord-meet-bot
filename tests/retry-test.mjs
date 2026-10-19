@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Retry behaviour across both upstreams: Google (429s, connect timeouts) and
  * Cloudflare-fronted Discord (refused connections).
  *
@@ -7,10 +7,10 @@
  * rather than re-implementing anything.
  */
 import { writeFileSync, readFileSync } from "node:fs";
-import { isTransient } from "./src/retry.js";
+import { isTransient } from "../src/retry.js";
 
 const out = [];
-const say = (s) => { out.push(s); writeFileSync("retry-test.txt", out.join("\n") + "\n", "utf8"); };
+const say = (s) => { out.push(s); writeFileSync(new URL("retry-test.txt", import.meta.url), out.join("\n") + "\n", "utf8"); };
 
 let fail = 0;
 const check = (label, got, want) => {
@@ -19,11 +19,11 @@ const check = (label, got, want) => {
   say(`  ${ok ? "PASS" : "FAIL"}  ${label.padEnd(50)} got ${JSON.stringify(got)}${ok ? "" : ` want ${JSON.stringify(want)}`}`);
 };
 
-const retrySrc = readFileSync("src/retry.js", "utf8");
-const meetSrc = readFileSync("src/googleMeet.js", "utf8");
-const idxSrc = readFileSync("src/index.js", "utf8");
-const poolSrc = readFileSync("src/meetingPool.js", "utf8");
-const logSrc = readFileSync("src/logger.js", "utf8");
+const retrySrc = readFileSync(new URL("../src/retry.js", import.meta.url), "utf8");
+const meetSrc = readFileSync(new URL("../src/googleMeet.js", import.meta.url), "utf8");
+const idxSrc = readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
+const poolSrc = readFileSync(new URL("../src/meetingPool.js", import.meta.url), "utf8");
+const logSrc = readFileSync(new URL("../src/logger.js", import.meta.url), "utf8");
 
 const codes = /const TRANSIENT_CODES = new Set\(\[([^\]]*)\]\);/.exec(retrySrc)[1];
 say(`TRANSIENT_CODES = [${codes}]  (src/retry.js)\n`);
@@ -90,10 +90,19 @@ check("heal retries a few times", /scheduleHeal\(attemptsLeft - 1\)/.test(poolSr
 check("heal stops once full", /if \(deficit <= 0\) return;/.test(poolSrc), true);
 check("heal timer is unref'd", /healTimer\.unref\?\.\(\)/.test(poolSrc), true);
 
-say("\n--- webhook failure is described, not bare ---");
-check("reports the network code", /Webhook log failed \(\$\{code/.test(logSrc), true);
-check("counts repeat blips", logSrc.includes("webhookBlips === 5"), true);
-check("asks the useful question", logSrc.includes("able to reach Discord at all"), true);
+say("\n--- webhook failure is handled, not bare ---");
+// The webhook used to log once and give up. It now goes through a queue that
+// retries, so these assertions cover the replacement behaviour: failures are
+// named, they are retried, and a dead webhook disables itself instead of
+// being hit forever.
+const queueSrc = readFileSync(new URL("../src/webhookQueue.js", import.meta.url), "utf8");
+check("a failure names the network code", /code.*network/.test(queueSrc), true);
+check("failures are retried", queueSrc.includes("retries++"), true);
+check("there is a cap on the attempts", queueSrc.includes("maxAttempts"), true);
+check("a dead webhook disables itself", queueSrc.includes("disabledReason"), true);
+check("it says the webhook is gone", /the webhook is gone or the URL is wrong/.test(queueSrc), true);
+check("the old give-up-and-forget path is gone", logSrc.includes("webhookBlips"), false);
+check("a rate limit is not a drop", !logSrc.includes("dropping this log line"), true);
 
 say(`\n${fail === 0 ? "ALL PASSED" : fail + " FAILED"}`);
 process.exitCode = fail ? 1 : 0;

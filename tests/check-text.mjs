@@ -1,4 +1,4 @@
-﻿import { parseTextCommand } from "./src/textCommands.js";
+﻿import { parseTextCommand } from "../src/textCommands.js";
 
 let pass = 0;
 let fail = 0;

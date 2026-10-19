@@ -1,4 +1,4 @@
-/**
+﻿/**
  * rooms.json is the source of truth: editing it must change what `meet`
  * returns, with no restart and no cached copy.
  */
@@ -11,7 +11,7 @@ const tmp = mkdtempSync(path.join(tmpdir(), "meetbot-rooms2-"));
 process.env.DATA_DIR = tmp;
 
 const out = [];
-const say = (s) => { out.push(s); writeFileSync("rooms-test.txt", out.join("\n") + "\n", "utf8"); };
+const say = (s) => { out.push(s); writeFileSync(new URL("rooms-test.txt", import.meta.url), out.join("\n") + "\n", "utf8"); };
 
 let fail = 0;
 const check = (label, got, want) => {
@@ -24,7 +24,7 @@ const MAIN = "1550540829112795187";
 const OTHER = "222222222222222222";
 const SEEDS = { 1: "seed-one-x1", 2: "seed-two-x2", 3: "seed-three-x3", 4: "seed-four-x4" };
 
-const { seedGuildRooms, resolveGuildRoom, getGuildRoom } = await import("./src/guildRooms.js");
+const { seedGuildRooms, resolveGuildRoom, getGuildRoom } = await import("../src/guildRooms.js");
 const roomsFile = path.join(tmp, "guilds", MAIN, "rooms.json");
 
 say("--- boot seeds the main guild's file ---");

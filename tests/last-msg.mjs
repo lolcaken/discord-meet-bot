@@ -1,11 +1,11 @@
-/**
+﻿/**
  * The `last` command's two outcomes, built from the real source so the exact
  * strings the bot will post are checked.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 
 const out = [];
-const say = (s) => { out.push(s); writeFileSync("last-msg.txt", out.join("\n") + "\n", "utf8"); };
+const say = (s) => { out.push(s); writeFileSync(new URL("last-msg.txt", import.meta.url), out.join("\n") + "\n", "utf8"); };
 
 let fail = 0;
 const check = (label, got, want) => {
@@ -14,7 +14,7 @@ const check = (label, got, want) => {
   say(`  ${ok ? "PASS" : "FAIL"}  ${label.padEnd(46)} got ${JSON.stringify(got)}${ok ? "" : ` want ${JSON.stringify(want)}`}`);
 };
 
-const src = readFileSync("src/index.js", "utf8");
+const src = readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
 
 say("--- `last` is a meet post plus one quiet label line ---");
 const meetPostSrc = /const meetPost = \(uri, label\) => \(\{[\s\S]*?\n\}\);/.exec(src)[0];
@@ -80,7 +80,7 @@ check("four call sites pass no label", others.length, 4);
 check("no emoji crept into any meet post", glyph.test(plain.content), false);
 
 say("\n--- wired into the typed path ---");
-check("parser knows the word", /"last"/.test(readFileSync("src/textCommands.js", "utf8")), true);
+check("parser knows the word", /"last"/.test(readFileSync(new URL("../src/textCommands.js", import.meta.url), "utf8")), true);
 check("dispatched before the meet regex",
   src.indexOf('if (name === "last")') < src.indexOf("const slot = /^meet"), true);
 check("returns after handling", /if \(name === "last"\) \{\s*await handleLast\(interaction\);\s*return;/.test(src), true);

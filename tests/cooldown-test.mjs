@@ -1,13 +1,13 @@
-/**
+﻿/**
  * Cooldown gate behaviour, executed against the helpers sliced straight out of
  * src/index.js so this tests the shipped logic rather than a copy of it.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 
 const out = [];
-const say = (s) => { out.push(s); writeFileSync("cooldown-test.txt", out.join("\n") + "\n", "utf8"); };
+const say = (s) => { out.push(s); writeFileSync(new URL("cooldown-test.txt", import.meta.url), out.join("\n") + "\n", "utf8"); };
 
-const src = readFileSync("src/index.js", "utf8");
+const src = readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
 const lines = src.split("\n");
 const start = lines.findIndex((l) => l.includes("const MEET_COOLDOWN_S"));
 const stop = lines.findIndex((l, i) => i > start && l.includes("async function takeMeetingWithCooldown"));
@@ -24,10 +24,14 @@ say(`=== extracted lines ${start + 1}-${end} from src/index.js ===`);
 
 let clock = 1_000_000;
 const FakeDate = { now: () => clock };
+// The cooldown length now comes from config.json, so the extracted code needs
+// a `limit` to call. It returns the default, which is what the real config
+// ships with.
 const { cooldownRemaining, markPosted, MEET_COOLDOWN_S } = new Function(
   "Date",
+  "limit",
   `${code}\nreturn { cooldownRemaining, markPosted, MEET_COOLDOWN_S };`
-)(FakeDate);
+)(FakeDate, () => 5);
 
 say(`=== MEET_COOLDOWN_S = ${MEET_COOLDOWN_S} ===\n`);
 

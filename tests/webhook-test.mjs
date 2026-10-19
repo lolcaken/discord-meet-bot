@@ -9,7 +9,7 @@
 import { writeFileSync } from "node:fs";
 
 const out = [];
-const say = (s) => { out.push(s); writeFileSync("webhook-test.txt", out.join("\n") + "\n", "utf8"); };
+const say = (s) => { out.push(s); writeFileSync(new URL("webhook-test.txt", import.meta.url), out.join("\n") + "\n", "utf8"); };
 
 let fail = 0;
 const check = (label, ok, detail = "") => {
@@ -21,7 +21,7 @@ process.env.LOG_WEBHOOK_MAX_PER_MINUTE = "28";
 process.env.LOG_WEBHOOK_QUEUE_MAX = "200";
 process.env.LOG_WEBHOOK_MAX_ATTEMPTS = "3";
 
-const { createWebhookQueue } = await import("./src/webhookQueue.js");
+const { createWebhookQueue } = await import("../src/webhookQueue.js");
 
 /** A fake fetch that records calls and replays a scripted list of outcomes. */
 function fakeFetch(script) {

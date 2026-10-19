@@ -1,4 +1,4 @@
-/**
+﻿/**
  * The owner's commands and the gate that keeps them owner's-only.
  *
  * The gate is the important part: these commands expose every server the bot
@@ -8,7 +8,7 @@
 import { writeFileSync } from "node:fs";
 
 const out = [];
-const say = (s) => { out.push(s); writeFileSync("owner-test.txt", out.join("\n") + "\n", "utf8"); };
+const say = (s) => { out.push(s); writeFileSync(new URL("owner-test.txt", import.meta.url), out.join("\n") + "\n", "utf8"); };
 
 let fail = 0;
 // check(label, got, want) - the same shape as the other suites, so a check
@@ -19,7 +19,7 @@ const check = (label, got, want) => {
   say(`  ${ok ? "PASS" : "FAIL"}  ${label.padEnd(50)} got ${JSON.stringify(got)}${ok ? "" : ` want ${JSON.stringify(want)}`}`);
 };
 
-const { isOwner, OWNER_ID, OWNER_MENTION, OWNER_ONLY_MESSAGE } = await import("./src/owner.js");
+const { isOwner, OWNER_ID, OWNER_MENTION, OWNER_ONLY_MESSAGE } = await import("../src/owner.js");
 
 say("=== who the owner is ===");
 check("the owner id is set", OWNER_ID, "970921305899687967");
@@ -46,7 +46,7 @@ check("the id with a suffix does not", isOwner(`${OWNER_ID}x`), false);
 check("a different account of the same length does not", isOwner("970921305899687968"), false);
 
 say("\n--- the text parser accepts the new words ---");
-const { parseTextCommand } = await import("./src/textCommands.js");
+const { parseTextCommand } = await import("../src/textCommands.js");
 const cmd = (n) => ({ name: n, options: { name: n } });
 for (const word of ["roster", "globalroster", "globallast"]) {
   check(`${word} parses`, parseTextCommand(word), cmd(word));
@@ -57,7 +57,7 @@ check("global roster is not confused with roster",
   parseTextCommand("global roster"), null);
 
 say("\n--- the new words are owner-gated in the handler ---");
-const src = await import("node:fs").then((fs) => fs.readFileSync("src/index.js", "utf8"));
+const src = await import("node:fs").then((fs) => fs.readFileSync(new URL("../src/index.js", import.meta.url), "utf8"));
 
 const handler = /async function handleOwnerOnly\(interaction, kind\) \{[\s\S]*?\n\}/.exec(src)?.[0] ?? "";
 check("there is an owner handler", handler.length > 0, true);
@@ -76,7 +76,7 @@ check("slash roster",
   /interaction\.commandName === "globallast"/.test(src), true);
 
 say("\n--- the slash commands are hidden from everyone else ---");
-const deploy = await import("node:fs").then((fs) => fs.readFileSync("src/deploy-commands.js", "utf8"));
+const deploy = await import("node:fs").then((fs) => fs.readFileSync(new URL("../src/deploy-commands.js", import.meta.url), "utf8"));
 for (const name of ["roster", "globalroster", "globallast"]) {
   const block = new RegExp(`setName\\("${name}"\\)[\\s\\S]*?\\.toJSON\\(\\)`).exec(deploy)?.[0] ?? "";
   check(`${name} is permission-gated in Discord`, block.includes("setDefaultMemberPermissions(0)"), true);

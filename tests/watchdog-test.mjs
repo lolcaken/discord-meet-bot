@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Why the bot died with exit code 0, and that the watchdog prevents it.
  *
  * Reproduces the shape: every long-lived timer registered inside the gateway's
@@ -10,7 +10,7 @@ import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 
 const out = [];
-const say = (s) => { out.push(s); writeFileSync("watchdog-test.txt", out.join("\n") + "\n", "utf8"); };
+const say = (s) => { out.push(s); writeFileSync(new URL("watchdog-test.txt", import.meta.url), out.join("\n") + "\n", "utf8"); };
 
 let fail = 0;
 const check = (label, got, want) => {
@@ -63,7 +63,7 @@ const guardedRun = await run(guarded);
 check("process is still running after 4s", guardedRun.code, "still-running");
 
 say("\n--- the real file is wired this way ---");
-const idx = (await import("node:fs")).readFileSync("src/index.js", "utf8");
+const idx = (await import("node:fs")).readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
 const readyAt = idx.indexOf('client.once("ready"');
 const watchdogAt = idx.indexOf("const watchdog = setInterval");
 const clearedAt = idx.indexOf("clearInterval(watchdog)");

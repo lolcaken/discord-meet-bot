@@ -1,4 +1,4 @@
-/**
+﻿/**
  * The slash-command registration, without touching Discord.
  *
  * The REST call is stubbed, so this checks the parts that actually matter
@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 const out = [];
-const say = (s) => { out.push(s); writeFileSync("deploy-test.txt", out.join("\n") + "\n", "utf8"); };
+const say = (s) => { out.push(s); writeFileSync(new URL("deploy-test.txt", import.meta.url), out.join("\n") + "\n", "utf8"); };
 
 let fail = 0;
 const check = (label, got, want) => {
@@ -24,8 +24,8 @@ const check = (label, got, want) => {
 const tmp = mkdtempSync(path.join(tmpdir(), "meetbot-deploy-"));
 process.env.DATA_DIR = tmp;
 
-const { registerCommands } = await import("./src/deploy-commands.js");
-const { DATA_ROOT } = await import("./src/dataPaths.js");
+const { registerCommands } = await import("../src/deploy-commands.js");
+const { DATA_ROOT } = await import("../src/dataPaths.js");
 
 // Record the REST calls instead of making them, so this exercises the real
 // registration path without touching Discord.
@@ -38,7 +38,7 @@ REST.prototype.put = async function (route, options) {
 };
 
 say("=== the command list is well formed ===");
-const deploySrc = readFileSync("src/deploy-commands.js", "utf8");
+const deploySrc = readFileSync(new URL("../src/deploy-commands.js", import.meta.url), "utf8");
 // Only the command builders count, not the option names (title, minutes,
 // notify, code) - those are setName calls on options, not on commands.
 const commandBlocks = deploySrc.split("new SlashCommandBuilder()").slice(1);
@@ -106,7 +106,7 @@ check("the same list is the same fingerprint",
 say("\n--- the env is found from any working directory ---");
 const deploySrcHasPath = /loadEnv\(\{ path: path\.join\(APP_DIR, "\.env"\) \}\)/.test(deploySrc);
 check("deploy loads .env by absolute path", deploySrcHasPath, true);
-const indexSrc = readFileSync("index.js", "utf8");
+const indexSrc = readFileSync(new URL("../index.js", import.meta.url), "utf8");
 check("the entry point loads .env by absolute path",
   /loadEnv\(\{ path: path\.join\(path\.dirname\(fileURLToPath\(import\.meta\.url\)\), "\.env"\) \}\)/.test(indexSrc),
   true);

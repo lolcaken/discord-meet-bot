@@ -1,4 +1,4 @@
-/**
+﻿/**
  * The inventory is what answers "which servers is the bot in" after a wipe, so
  * it is tested against a fake client and a real data directory: folders are
  * created, the main guild's rooms are restored from source, and hand-edited
@@ -20,7 +20,7 @@ process.env.GOOGLE_CLIENT_SECRET ??= "test-secret";
 process.env.GOOGLE_REFRESH_TOKEN ??= "test-refresh";
 
 const out = [];
-const say = (s) => { out.push(s); writeFileSync("inventory-test.txt", out.join("\n") + "\n", "utf8"); };
+const say = (s) => { out.push(s); writeFileSync(new URL("inventory-test.txt", import.meta.url), out.join("\n") + "\n", "utf8"); };
 
 let fail = 0;
 // Same signature as the other suites: check(label, got, want), so a test that
@@ -31,7 +31,7 @@ const check = (label, got, want) => {
   say(`  ${ok ? "PASS" : "FAIL"}  ${label.padEnd(48)} got ${JSON.stringify(got)}${ok ? "" : ` want ${JSON.stringify(want)}`}`);
 };
 
-const { rebuild, render, ensureGuildFolder } = await import("./src/inventory.js");
+const { rebuild, render, ensureGuildFolder } = await import("../src/inventory.js");
 
 const MAIN = "1550540829112795187";
 const OTHER = "1463484922604945421";

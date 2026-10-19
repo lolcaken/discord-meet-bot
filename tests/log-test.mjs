@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Exercise the real logger against a throwaway log file, checking the envelope,
  * rotation trigger, and that nothing throws when the webhook is unusable.
  */
@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync, rmSync, readdirSync } from "node:fs";
 import path from "node:path";
 
 const out = [];
-const say = (s) => { out.push(s); writeFileSync("log-test.txt", out.join("\n") + "\n", "utf8"); };
+const say = (s) => { out.push(s); writeFileSync(new URL("log-test.txt", import.meta.url), out.join("\n") + "\n", "utf8"); };
 
 let fail = 0;
 const check = (label, got, want) => {
@@ -24,7 +24,7 @@ const before = readFileSync(LOG_FILE, "utf8");
 process.env.DISCORD_LOG_WEBHOOK_URL = "";
 process.env.DISCORD_ERROR_WEBHOOK_URL = "";
 
-const { logEvent, logMeetCreated, logBlocked, logFailure, logDenied } = await import("./src/logger.js");
+const { logEvent, logMeetCreated, logBlocked, logFailure, logDenied } = await import("../src/logger.js");
 
 say("--- envelope and levels ---");
 await logEvent("info", "test.plain", { hello: "world" });

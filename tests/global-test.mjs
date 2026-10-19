@@ -1,4 +1,4 @@
-/**
+﻿/**
  * The global commands' logic, against a fake Meet API.
  *
  * The point of `last` and `globallast` is finding a meeting that actually has
@@ -17,7 +17,7 @@ process.env.GOOGLE_CLIENT_SECRET ??= "y";
 process.env.GOOGLE_REFRESH_TOKEN ??= "z";
 
 const out = [];
-const say = (s) => { out.push(s); writeFileSync("global-test.txt", out.join("\n") + "\n", "utf8"); };
+const say = (s) => { out.push(s); writeFileSync(new URL("global-test.txt", import.meta.url), out.join("\n") + "\n", "utf8"); };
 
 let fail = 0;
 const check = (label, got, want) => {
@@ -49,7 +49,7 @@ const LIVE = {
 };
 
 const { liveMeetingsEverywhere, rosterEverywhere, renderRoster, renderLiveMeetings } =
-  await import("./src/globalMeetings.js");
+  await import("../src/globalMeetings.js");
 
 // Stub the API by intercepting the module's imports is not possible here, so
 // exercise the pure parts (roster + rendering) directly, and test the live

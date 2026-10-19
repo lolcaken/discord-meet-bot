@@ -18,6 +18,43 @@ Type `meet` in any Discord server and everyone gets in. No plugin, no waiting ro
 
 ---
 
+## Project layout
+
+```
+discord-meet-bot/
+├── index.js              the entry point your host runs
+├── start.sh              what the host's start command calls
+├── config.json           the on/off switches (committed, no secrets)
+├── package.json
+├── src/
+│   ├── index.js          the bot itself: commands, events, startup
+│   ├── config.js         reads config.json, forgivingly
+│   ├── googleMeet.js     the Google Meet API calls
+│   ├── meetingPool.js    pre-created links, so replies are instant
+│   ├── guildRooms.js     the per-server standing rooms
+│   ├── spaceRegistry.js  which meetings were handed out, where
+│   ├── scheduleStore.js  pending /schedule entries
+│   ├── scopeInfo.js      who each data folder belongs to
+│   ├── scopeReports.js   the per-server reports
+│   ├── inventory.js      which servers the bot is in
+│   ├── globalMeetings.js the global roster and live meetings
+│   ├── owner.js          who the owner is, and the refusal message
+│   ├── logger.js         the file log and the webhook
+│   ├── webhookQueue.js   the webhook queue that never drops a line
+│   ├── textCommands.js   the typed words
+│   ├── deploy-commands.js  registers the slash commands with Discord
+│   ├── dataPaths.js      where everything on disk lives
+│   ├── retry.js          retries the things worth retrying
+│   ├── preloadedMeets.js the main server's starting rooms
+│   └── getToken.js       the one-time Google sign-in
+├── tests/                every suite, plus a runner
+├── scripts/              developer tools, not part of the bot
+├── data/                 runtime state (created on first run, not committed)
+└── logs/                 the log files (not committed)
+```
+
+`npm test` runs every suite. `npm run config` shows the settings the bot is running with.
+
 ## What it does
 
 ```text
@@ -294,22 +331,81 @@ eventually.
 
 The deploy only calls Discord when the command list has actually changed, so running
 it on every start is cheap. That makes it safe to put in the host's startup command,
-which is how a pushed change becomes live on the next restart:
+which is how a pushed change becomes live on the next restart.
+
+**Use `start.sh` rather than pasting a long command.** The startup command is then
+just:
 
 ```bash
-if [ -f /home/container/src/deploy-commands.js ]; then /usr/local/bin/node /home/container/src/deploy-commands.js > /dev/null 2>&1 || true; fi
+bash /home/container/start.sh
 ```
 
-The `|| true` matters: a failed registration must never stop the bot from starting.
-Every typed command works whether or not the slash commands exist.
+`start.sh` installs the dependencies, registers the slash commands, and runs the bot.
+A long one-liner pasted into a web form gets truncated, and a truncated startup
+command fails quietly — the part that gets cut is usually the `npm install`, so the bot
+starts with no dependencies and dies with a missing-package error that looks nothing
+like the cause.
 
-### Optional config
+Two details in `start.sh` matter:
+
+- Registering the slash commands failing is **not** fatal. Every typed command works
+  without them, so a Discord hiccup at boot must not stop the bot from starting.
+- The bot is started with `exec`, so the signal your host sends to stop the server
+  reaches the bot directly instead of being swallowed by the shell.
+
+### Turning features off — `config.json`
+
+`config.json` in the repo root is where you switch things on and off. It's committed on
+purpose, so the settings travel with the code and anyone who clones the bot can see how
+it's meant to run. **Secrets do not go here** — those stay in `.env`.
+
+```json
+{
+  "commands":  { "meet": true, "rand": true, "last": true, "...": true },
+  "features":  { "standingRooms": true, "participantCounter": true, "...": true },
+  "limits":    { "cooldownSeconds": 5, "poolSize": 5, "...": 5 }
+}
+```
+
+Edit it, restart, done. Run `npm run config` to see what the bot is actually running with.
+
+| Switch | What turning it off does |
+| --- | --- |
+| `commands.meet` | Removes `/meet`, and stops typed `meet`/`cd`/`meet2`… working |
+| `commands.rand` | Removes `/rand` and typed `rand` |
+| `commands.last` | Stops typed `last` finding the meeting people are in |
+| `commands.schedule` | Removes `/schedule` |
+| `commands.end` | Removes `/end` |
+| `commands.servers` | Removes `/servers` |
+| `commands.roster` / `globalroster` / `globallast` | The owner's commands, off |
+| `features.standingRooms` | The per-server fixed rooms; typed `meet` falls back to a random link |
+| `features.participantCounter` | The live `👤` headcount under a meeting link |
+| `features.webhookLogging` | Nothing is posted to the log webhook (the file log carries on) |
+| `features.schedules` | No timers are armed; scheduled meetings never fire |
+| `features.inventory` | The server inventory isn't written to `data/guilds.json` |
+| `limits.cooldownSeconds` | Seconds between meeting posts in a channel |
+| `limits.maxScheduleMinutes` | How far ahead `/schedule` can be set (default 7 days) |
+| `limits.poolSize` | Links pre-created in the background, so replies are instant |
+| `limits.logWebhook*` | How the log webhook queue paces, queues and retries |
+
+A command that's off **isn't registered with Discord at all**, so it disappears from
+everyone's command palette — and because registering replaces the whole list, turning one
+off here actually removes it. Typed commands don't parse at all when they're off.
+
+The loader is forgiving on purpose: no `config.json` means everything is on, a broken one
+falls back to the defaults with a warning, and a value of the wrong type is ignored. A
+typo in a switch should never stop the bot from starting.
+
+### Environment variables
+
+These still work and, for the limits, still win over `config.json`:
 
 | Variable | Default | Notes |
 | --- | --- | --- |
 | `MEETING_POOL_SIZE` | `5` | Links pre-created in the background, so replies are instant |
 | `DISCORD_GUILD_ID` | empty | Set while developing for instant command registration, clear for global |
 | `DISCORD_LOG_WEBHOOK_URL` | empty | Logs every meeting created, and by whom |
+| `MAIN_GUILD_ID` | empty | The server that owns the standing rooms and `/end` |
 
 ## Plain text commands
 

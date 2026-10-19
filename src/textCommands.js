@@ -15,7 +15,12 @@
  * Returns null for anything that isn't one of those exact words, which is
  * what keeps ordinary conversation safe: "lets meet tomorrow" and
  * "i met him today" both fall through.
+ *
+ * A command switched off in config.json doesn't parse at all, so it behaves
+ * exactly as if it had never existed.
  */
+
+import { commandEnabled, featureEnabled } from "./config.js";
 
 // Short aliases, resolved to the command they stand in for. `cd` is
 // change-directory shorthand, which is muscle memory for anyone used to a
@@ -37,6 +42,24 @@ const KNOWN = new Set([
   "globallast",
 ]);
 
+/**
+ * Is this parsed command allowed to run?
+ *
+ * The typed standing rooms (`meet`, `cd`, `meet2`…`meetN`) need both the meet
+ * command and the standing-rooms feature, because they are the standing-room
+ * flavour of meet - switch off either and there's nothing to post.
+ *
+ * Slot 1 is reached by typing plain `meet`, so it counts as a standing room
+ * even though it doesn't match the PRELOADED pattern, which is for slots 2+.
+ */
+function isEnabled(name) {
+  const isStandingRoom = name === "meet" || PRELOADED.test(name);
+  if (isStandingRoom) {
+    return commandEnabled("meet") && featureEnabled("standingRooms");
+  }
+  return commandEnabled(name);
+}
+
 export function parseTextCommand(content) {
   if (typeof content !== "string") return null;
 
@@ -49,6 +72,7 @@ export function parseTextCommand(content) {
   const word = text.toLowerCase();
   const name = ALIASES[word] ?? word;
   if (!KNOWN.has(name) && !PRELOADED.test(name)) return null;
+  if (!isEnabled(name)) return null;
 
   return { name, options: { name } };
 }

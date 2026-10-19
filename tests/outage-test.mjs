@@ -1,11 +1,11 @@
-/**
+﻿/**
  * Outage reporting: a connection error should produce one clear line, a real
  * bug should always be printed, and neither should be silently swallowed.
  */
 import { writeFileSync, readFileSync } from "node:fs";
 
 const out = [];
-const say = (s) => { out.push(s); writeFileSync("outage-test.txt", out.join("\n") + "\n", "utf8"); };
+const say = (s) => { out.push(s); writeFileSync(new URL("outage-test.txt", import.meta.url), out.join("\n") + "\n", "utf8"); };
 
 let fail = 0;
 const check = (label, got, want) => {
@@ -14,7 +14,7 @@ const check = (label, got, want) => {
   say(`  ${ok ? "PASS" : "FAIL"}  ${label.padEnd(48)} got ${JSON.stringify(got)}${ok ? "" : ` want ${JSON.stringify(want)}`}`);
 };
 
-const idx = readFileSync("src/index.js", "utf8");
+const idx = readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
 
 say("--- reportCrash exists and is wired to both handlers ---");
 check("isTransient imported", idx.includes('import { withRetry, isTransient } from "./retry.js";'), true);

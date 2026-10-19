@@ -24,6 +24,8 @@
  * latency to a command reply.
  */
 
+import { limit } from "./config.js";
+
 const WEBHOOK_TIMEOUT_MS = 8000;
 
 // Under Discord's 30/minute ceiling, with room for the 429 safety net to do
@@ -41,9 +43,9 @@ const num = (value, fallback) => {
 };
 
 const config = () => ({
-  maxPerMinute: num(process.env.LOG_WEBHOOK_MAX_PER_MINUTE, DEFAULT_MAX_PER_MINUTE),
-  queueMax: num(process.env.LOG_WEBHOOK_QUEUE_MAX, DEFAULT_QUEUE_MAX),
-  maxAttempts: num(process.env.LOG_WEBHOOK_MAX_ATTEMPTS, DEFAULT_MAX_ATTEMPTS),
+  maxPerMinute: num(limit("logWebhookPerMinute"), DEFAULT_MAX_PER_MINUTE),
+  queueMax: num(limit("logWebhookQueueMax"), DEFAULT_QUEUE_MAX),
+  maxAttempts: num(limit("logWebhookMaxAttempts"), DEFAULT_MAX_ATTEMPTS),
 });
 
 /** Discord's 429 body is JSON with retry_after in seconds; anything else is noise. */

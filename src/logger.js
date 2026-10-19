@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createWebhookQueue } from "./webhookQueue.js";
+import { featureEnabled, limit } from "./config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LOG_DIR = path.join(__dirname, "..", "logs");
@@ -128,6 +129,11 @@ function getQueue() {
 }
 
 function postToWebhook(level, event, data) {
+  // Webhook logging is a feature that can be switched off in config.json.
+  // The file log carries on either way - it is the durable record - so
+  // turning this off just means nothing is posted to Discord.
+  if (!featureEnabled("webhookLogging")) return;
+
   // Errors can be routed somewhere louder without duplicating everything.
   const url =
     level === "error" && process.env.DISCORD_ERROR_WEBHOOK_URL

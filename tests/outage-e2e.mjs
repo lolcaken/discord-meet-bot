@@ -1,4 +1,4 @@
-/**
+﻿/**
  * End-to-end: a bot whose Discord gateway refuses connections must stay
  * alive, say so once, and stay quiet after that.
  *
@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 const out = [];
-const say = (s) => { out.push(s); writeFileSync("outage-e2e.txt", out.join("\n") + "\n", "utf8"); };
+const say = (s) => { out.push(s); writeFileSync(new URL("outage-e2e.txt", import.meta.url), out.join("\n") + "\n", "utf8"); };
 
 let fail = 0;
 const check = (label, got, want) => {
@@ -28,7 +28,7 @@ const retryUrl = pathToFileURL(path.resolve("src/retry.js")).href;
 // Pulls the real reportCrash + watchdog out of src/index.js so the test
 // exercises what actually ships, not a paraphrase.
 const { readFileSync } = await import("node:fs");
-const idx = readFileSync("src/index.js", "utf8");
+const idx = readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
 const reportCrash = /function reportCrash\(err\) \{[\s\S]*?\n\}/.exec(idx)[0];
 const watchdog = /const watchdog = setInterval\(\(\) => \{[\s\S]*?\}, STARTUP_WATCHDOG_MS\);/.exec(idx)[0];
 

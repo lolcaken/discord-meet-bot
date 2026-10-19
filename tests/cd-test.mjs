@@ -1,16 +1,16 @@
-/**
+﻿/**
  * End-to-end check that typed `cd` lands on the hardcoded link, using the real
  * parser and the real slot regex taken out of src/index.js.
  */
-import { parseTextCommand } from "./src/textCommands.js";
-import { PRELOADED_MEETS } from "./src/preloadedMeets.js";
+import { parseTextCommand } from "../src/textCommands.js";
+import { PRELOADED_MEETS } from "../src/preloadedMeets.js";
 import { readFileSync, writeFileSync } from "node:fs";
 
 const out = [];
-const say = (s) => { out.push(s); writeFileSync("cd-test.txt", out.join("\n") + "\n", "utf8"); };
+const say = (s) => { out.push(s); writeFileSync(new URL("cd-test.txt", import.meta.url), out.join("\n") + "\n", "utf8"); };
 
 // The real regex from the shipped handler, not a re-implementation.
-const src = readFileSync("src/index.js", "utf8");
+const src = readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
 const m = /const slot = (\/\^meet.*?\/[a-z]*)\.exec\(name\)/.exec(src);
 const slotRe = new RegExp(m[1].slice(1, -1));
 say(`handler slot regex: ${m[1]}\n`);
@@ -46,12 +46,16 @@ const linkFor = (t) => {
   return sm ? PRELOADED_MEETS[sm[1] ?? "1"] : "RANDOM";
 };
 
+// The expected codes come from PRELOADED_MEETS rather than being written out
+// here, so a room that changes (or moves to a data file) doesn't leave a
+// stale expectation behind.
 check("cd gives the same link as meet", linkFor("cd"), linkFor("meet"));
-check("cd gives tgc-rzea-btb", linkFor("cd"), "tgc-rzea-btb");
-check("meet still gives tgc-rzea-btb", linkFor("meet"), "tgc-rzea-btb");
+check("cd gives slot 1's code", linkFor("cd"), PRELOADED_MEETS["1"]);
+check("meet still gives slot 1's code", linkFor("meet"), PRELOADED_MEETS["1"]);
 check("cd is hardcoded, not random", linkFor("cd") !== "RANDOM", true);
 check("rand stays random", linkFor("rand"), "RANDOM");
-check("meet2 unaffected", linkFor("meet2"), "tif-juqf-tsx");
+check("meet2 unaffected", linkFor("meet2"), PRELOADED_MEETS["2"]);
+check("meet2 is a different room from meet", linkFor("meet2") !== linkFor("meet"), true);
 
 say(`\n${fail === 0 ? "ALL PASSED" : fail + " FAILED"}`);
 process.exitCode = fail ? 1 : 0;

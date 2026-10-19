@@ -1,11 +1,11 @@
-/**
+﻿/**
  * Typed commands must work in DMs, not just servers. These checks read the real
  * source to confirm the DM path exists and is wired.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 
 const out = [];
-const say = (s) => { out.push(s); writeFileSync("dm-test.txt", out.join("\n") + "\n", "utf8"); };
+const say = (s) => { out.push(s); writeFileSync(new URL("dm-test.txt", import.meta.url), out.join("\n") + "\n", "utf8"); };
 
 let fail = 0;
 const check = (label, got, want) => {
@@ -14,7 +14,7 @@ const check = (label, got, want) => {
   say(`  ${ok ? "PASS" : "FAIL"}  ${label.padEnd(52)} got ${JSON.stringify(got)}${ok ? "" : ` want ${JSON.stringify(want)}`}`);
 };
 
-const src = readFileSync("src/index.js", "utf8");
+const src = readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
 
 say("--- messageCreate no longer skips DMs ---");
 const handler = /client\.on\("messageCreate"[\s\S]*?\n\}\);/.exec(src);

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Multi-guild behaviour, executed against the real functions sliced out of
  * src/index.js: the permission table and room resolution.
  */
@@ -6,9 +6,9 @@ import "dotenv/config";
 import { readFileSync, writeFileSync } from "node:fs";
 
 const out = [];
-const say = (s) => { out.push(s); writeFileSync("guild-test.txt", out.join("\n") + "\n", "utf8"); };
+const say = (s) => { out.push(s); writeFileSync(new URL("guild-test.txt", import.meta.url), out.join("\n") + "\n", "utf8"); };
 
-const src = readFileSync("src/index.js", "utf8");
+const src = readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
 const MAIN = "1550540829112795187";
 const OTHER = "999888777666555444";
 const DM = null;
@@ -46,7 +46,7 @@ for (const name of [...new Set([...MAIN_ONLY, ...GUILD_ONLY, "meet", "rand"])]) 
 }
 
 // ---- room resolution: main guild must never generate ----
-const preloaded = readFileSync("src/preloadedMeets.js", "utf8");
+const preloaded = readFileSync(new URL("../src/preloadedMeets.js", import.meta.url), "utf8");
 const codes = [...preloaded.matchAll(/^\s*\d:\s*"([a-z0-9-]+)"/gm)].map((m) => m[1]);
 say(`\npreloaded codes in source: ${codes.length} (${codes.join(", ")})`);
 check("main guild has 4 rooms", codes.length, 4);
@@ -74,7 +74,7 @@ md(nodePath.join(tmp, "guilds", A), { recursive: true });
 wf(nodePath.join(tmp, "guilds", A, "rooms.json"), JSON.stringify({ 1: "aaa-bbb-ccc" }), "utf8");
 
 process.env.DATA_DIR = tmp;
-const { getGuildRoom } = await import("./src/guildRooms.js");
+const { getGuildRoom } = await import("../src/guildRooms.js");
 
 check("stored room reads back", (await getGuildRoom(A, "1")), "aaa-bbb-ccc");
 check("missing slot is null", (await getGuildRoom(A, "2")), null);

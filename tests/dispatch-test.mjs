@@ -1,11 +1,11 @@
-import { parseTextCommand } from "./src/textCommands.js";
-import { PRELOADED_MEETS } from "./src/preloadedMeets.js";
+﻿import { parseTextCommand } from "../src/textCommands.js";
+import { PRELOADED_MEETS } from "../src/preloadedMeets.js";
 import { readFileSync, writeFileSync } from "node:fs";
 
 const out = [];
-const say = (s) => { out.push(s); writeFileSync("dispatch-test.txt", out.join("\n") + "\n", "utf8"); };
+const say = (s) => { out.push(s); writeFileSync(new URL("dispatch-test.txt", import.meta.url), out.join("\n") + "\n", "utf8"); };
 
-const src = readFileSync("src/index.js", "utf8");
+const src = readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
 const meetPost = /\@everyone join meet!!\\n\$\{uri\}/.test(src);
 
 say("=== full path: message -> parse -> slot -> link ===");

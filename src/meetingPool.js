@@ -1,7 +1,10 @@
 import { createOpenMeetSpace } from "./googleMeet.js";
 import { logFailure } from "./logger.js";
+import { limit } from "./config.js";
 
-const POOL_SIZE = Number(process.env.MEETING_POOL_SIZE) || 5;
+// The pool size. config.json is the place for it; MEETING_POOL_SIZE in the
+// environment still wins if it's set, for anyone who prefers to set it there.
+const POOL_SIZE = Number(process.env.MEETING_POOL_SIZE) || limit("poolSize");
 
 // If a create fails at boot, don't leave the pool short until somebody happens
 // to use /meet. Retry the shortfall on a timer for a while, then give up and let

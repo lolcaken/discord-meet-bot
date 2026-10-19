@@ -10,6 +10,7 @@ import {
   InteractionContextType,
 } from "discord.js";
 import { readJson, writeJson, DATA_ROOT } from "./dataPaths.js";
+import { commandEnabled, loadConfig, configPath, hasConfigFile } from "./config.js";
 
 // Load .env from the app's own folder rather than the working directory. A
 // panel may start the app from anywhere, and without this the deploy would
@@ -49,7 +50,12 @@ const CONTEXTS = [
   InteractionContextType.PrivateChannel,
 ];
 
-const commands = [
+// The command list, each with the config.json key that switches it off.
+//
+// The builders are kept as a plain list and filtered when registering, rather
+// than being built conditionally, so the shape of a command never depends on
+// the config: turning one off can't change another one.
+const ALL_COMMANDS = [
   new SlashCommandBuilder()
     .setName("meet")
     .setDescription("Generate a MEETING LINK.")
@@ -149,6 +155,20 @@ const commands = [
 ];
 
 /**
+ * The commands that are switched on in config.json.
+ *
+ * A command that's off isn't registered with Discord at all, so it doesn't
+ * appear in anyone's palette - and because registering replaces the whole
+ * list, turning one off here actually removes it from Discord too.
+ */
+export function enabledCommands() {
+  return ALL_COMMANDS.filter((c) => commandEnabled(c.name));
+}
+
+/** Every command the bot knows about, on or off. Used by the tests. */
+export const allCommands = () => ALL_COMMANDS.map((c) => c.name);
+
+/**
  * Actually put the commands in front of Discord.
  *
  * Discord keeps its own list of a bot's commands, separate from the code that
@@ -171,7 +191,7 @@ export async function registerCommands({ force = false } = {}) {
 
   // The builders already called .toJSON() when the list was built, so each
   // entry is already a plain object ready for the API.
-  const body = commands;
+  const body = enabledCommands();
 
   // Skip the API call when nothing has changed. Discord rate-limits command
   // registration, and a server that restarts on a timer would otherwise burn

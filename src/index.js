@@ -20,6 +20,7 @@ import { addSchedule, loadAllSchedules, removeSchedule } from "./scheduleStore.j
 import { rememberSpace, latestSpace, allSpaces } from "./spaceRegistry.js";
 import { liveMeetingsEverywhere, rosterEverywhere, renderRoster, renderLiveMeetings } from "./globalMeetings.js";
 import { isOwner, OWNER_ONLY_MESSAGE } from "./owner.js";
+import { commandEnabled, featureEnabled, limit } from "./config.js";
 import { withRetry, isTransient } from "./retry.js";
 import { countServicedGuilds, resolveGuildRoom, seedGuildRooms } from "./guildRooms.js";
 import { migrateLegacyData } from "./dataPaths.js";
@@ -104,7 +105,7 @@ const GOOGLE_MEET_LOGO_URL =
 // setTimeout can't reliably wait longer than ~24.8 days; we cap well under
 // that and re-check schedules periodically instead of relying on one giant
 // timer, so this survives being wrong by a few minutes at worst.
-const MAX_SCHEDULE_MINUTES = 10080; // 7 days
+const MAX_SCHEDULE_MINUTES = limit("maxScheduleMinutes"); // 7 days by default
 const RECHECK_INTERVAL_MS = 60_000; // re-scan schedules every minute
 const PROFILE_REFRESH_MS = 6 * 60 * 60 * 1000; // keep data-folder profiles current
 
@@ -164,6 +165,10 @@ const PARTICIPANT_WATCH_MS = 2 * 60 * 60 * 1000;
 
 async function watchParticipants(message, spaceRef) {
   if (!message || !spaceRef) return;
+
+  // The live headcount is a feature that can be switched off in config.json.
+  // The link still posts; it just doesn't get a count under it.
+  if (!featureEnabled("participantCounter")) return;
 
   // The body stays byte-identical to what was posted; the count lives on its
   // own line underneath, so an edit can only ever replace that one line.
@@ -493,6 +498,11 @@ function scheduleTimer(schedule) {
 }
 
 async function scanAndArm() {
+  // Scheduling is a feature that can be switched off. With it off, no timers
+  // are armed and nothing fires - the /schedule command is off too, so there
+  // is nothing new to fire in the first place.
+  if (!featureEnabled("schedules")) return 0;
+
   // Sweeps every scope, so a schedule in one server still fires even when
   // another server is the one with new activity.
   const schedules = await loadAllSchedules();
@@ -589,14 +599,16 @@ client.once("ready", async () => {
   // Reconstruct the whole picture from the live gateway: make sure every
   // server the bot is in has its folder back (re-seeding the main guild's
   // standing rooms from source), and write data/guilds.json as the single
-  // answer to "which servers is this bot in". Rebuilding from Discord rather
-  // than a stored list is the point - a lost disk can't take the inventory
-  // with it, because the gateway is the source of truth for this.
-  const inventory = await rebuildInventory(client, {
-    isMainGuild,
-    seeds: PRELOADED_MEETS,
-    mainGuildId: MAIN_GUILD_ID,
-  });
+  // answer to "which servers is this bot is in". Rebuilding from Discord
+  // rather than a stored list is the point - a lost disk can't take the
+  // inventory with it, because the gateway is the source of truth for this.
+  const inventory = featureEnabled("inventory")
+    ? await rebuildInventory(client, {
+        isMainGuild,
+        seeds: PRELOADED_MEETS,
+        mainGuildId: MAIN_GUILD_ID,
+      })
+    : { rows: [], ensured: [] };
   const restored = inventory.ensured.filter((e) => e.seeded).length;
   if (inventory.ensured.length) {
     console.log(
@@ -684,7 +696,7 @@ client.on("guildDelete", async (guild) => {
  * Scoped per channel on purpose: two busy channels shouldn't block each other,
  * and one chatty channel is where the spam actually comes from.
  */
-const MEET_COOLDOWN_S = 5;
+const MEET_COOLDOWN_S = limit("cooldownSeconds");
 const lastPostAt = { new: new Map(), preloaded: new Map() };
 
 function cooldownRemaining(gate, channelId) {
@@ -742,6 +754,10 @@ function secondsLeft(wait) {
  */
 async function roomCodeFor(guildId, slot) {
   if (!guildId) return null; // DMs have no rooms; they use /meet and /rand
+  // Standing rooms are a feature that can be switched off. With them off, a
+  // typed `meet` in a server has no room to post, so the caller falls back to
+  // a pooled link.
+  if (!featureEnabled("standingRooms")) return null;
   const seed = isMainGuild(guildId) ? PRELOADED_MEETS[slot] : undefined;
   return resolveGuildRoom(guildId, slot, { seed });
 }
@@ -853,6 +869,23 @@ async function handleCommand(interaction) {
         reason: refusal,
       });
       return void (await safeReply(interaction, { content: refusal, ephemeral: true }));
+    }
+
+    // A command switched off in config.json. The typed ones never get this
+    // far - they don't parse at all - so this catches the slash versions,
+    // which Discord may still have cached from before the switch was flipped.
+    // Saying so beats doing nothing and looking broken.
+    if (!interaction.isTextCommand && !commandEnabled(interaction.commandName)) {
+      await logDenied({
+        command: interaction.commandName,
+        guildId: interaction.guildId ?? null,
+        user: interaction.user?.username,
+        reason: "disabled in config.json",
+      });
+      return void (await safeReply(interaction, {
+        content: `\`/${interaction.commandName}\` is switched off in the bot's config.json.`,
+        ephemeral: true,
+      }));
     }
 
     // Typed commands are matched FIRST, and deliberately so. A typed `meet`

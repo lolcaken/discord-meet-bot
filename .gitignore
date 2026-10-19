@@ -1,6 +1,6 @@
 node_modules/
 
-# Secrets — never commit these
+# Secrets - never commit these
 .env
 .env.*
 !.env.example
@@ -15,8 +15,15 @@ data/
 *.log
 
 # Deploy tooling (holds host/port/user)
-deploy*.py
-deploy*.log
+scripts/deploy*.py
+scripts/deploy*.log
+scripts/*.log
 
-# test output
-*-test.txt
+# Test output, written next to the suites that produce it
+tests/*.txt
+
+# Editor noise
+.vscode/
+.idea/
+*.swp
+.DS_Store

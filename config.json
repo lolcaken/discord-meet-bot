@@ -1,0 +1,37 @@
+{
+  "$comment": [
+    "Feature switches for this bot. Edit this file and restart - no code change needed.",
+    "Anything set to false is switched off completely: the command is not registered",
+    "with Discord, and typing it does nothing.",
+    "Secrets do NOT go here. Tokens stay in .env, which is never committed."
+  ],
+
+  "commands": {
+    "meet": true,
+    "rand": true,
+    "last": true,
+    "schedule": true,
+    "end": true,
+    "servers": true,
+    "roster": true,
+    "globalroster": true,
+    "globallast": true
+  },
+
+  "features": {
+    "standingRooms": true,
+    "participantCounter": true,
+    "webhookLogging": true,
+    "schedules": true,
+    "inventory": true
+  },
+
+  "limits": {
+    "cooldownSeconds": 5,
+    "maxScheduleMinutes": 10080,
+    "poolSize": 5,
+    "logWebhookPerMinute": 28,
+    "logWebhookQueueMax": 200,
+    "logWebhookMaxAttempts": 5
+  }
+}

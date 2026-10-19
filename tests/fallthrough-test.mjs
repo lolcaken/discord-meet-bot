@@ -1,4 +1,4 @@
-/**
+﻿/**
  * The real regression guard for the bad-request bug: an interaction for a
  * command no branch handles must still get a reply.
  *
@@ -12,9 +12,9 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 
-const src = readFileSync("src/index.js", "utf8");
+const src = readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
 const out = [];
-const say = (s) => { out.push(s); writeFileSync("fallthrough-test.txt", out.join("\n") + "\n", "utf8"); };
+const say = (s) => { out.push(s); writeFileSync(new URL("fallthrough-test.txt", import.meta.url), out.join("\n") + "\n", "utf8"); };
 
 let fail = 0;
 const check = (label, ok, detail = "") => {
@@ -62,6 +62,7 @@ const build = new Function(
     meetPost, watchParticipants, rememberSpace, latestSpace, allSpaces,
     liveMeetingsEverywhere, rosterEverywhere, renderRoster, renderLiveMeetings,
     isOwner, OWNER_ONLY_MESSAGE, handleOwnerOnly,
+    commandEnabled, featureEnabled, limit,
     getSpace, listParticipants, endActiveConference, takeMeetingWithCooldown,
     resolveSpace, rebuildInventory, renderInventory, apiHint, NO_MEETING,
     checkAllowed, MAX_SCHEDULE_MINUTES, describeScope,
@@ -93,6 +94,8 @@ const deps = {
   liveMeetingsEverywhere: noop, rosterEverywhere: noop,
   renderRoster: () => "", renderLiveMeetings: () => "",
   isOwner: () => false, OWNER_ONLY_MESSAGE: "owner only",
+  // Every command is on by default, so the tests exercise the normal path.
+  commandEnabled: () => true, featureEnabled: () => true, limit: () => 5,
   getSpace: noop, listParticipants: noop, endActiveConference: noop,
   takeMeetingWithCooldown: noop, resolveSpace: noop,
   rebuildInventory: noop, renderInventory: () => "", apiHint: () => "", NO_MEETING: "",

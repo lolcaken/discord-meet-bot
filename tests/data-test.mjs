@@ -1,4 +1,4 @@
-/**
+﻿/**
  * The per-server data layout: scoping, isolation between servers, traversal
  * safety, and the legacy migration. Runs against a throwaway DATA_DIR.
  */
@@ -10,7 +10,7 @@ const root = mkdtempSync(path.join(tmpdir(), "meetbot-data-"));
 process.env.DATA_DIR = root;
 
 const out = [];
-const say = (s) => { out.push(s); writeFileSync("data-test.txt", out.join("\n") + "\n", "utf8"); };
+const say = (s) => { out.push(s); writeFileSync(new URL("data-test.txt", import.meta.url), out.join("\n") + "\n", "utf8"); };
 
 let fail = 0;
 const check = (label, got, want) => {
@@ -20,9 +20,9 @@ const check = (label, got, want) => {
 };
 
 // Imported after DATA_DIR is set, since the path module reads it at load.
-const paths = await import("./src/dataPaths.js");
-const { rememberSpace, latestSpace } = await import("./src/spaceRegistry.js");
-const { addSchedule, loadAllSchedules, removeSchedule } = await import("./src/scheduleStore.js");
+const paths = await import("../src/dataPaths.js");
+const { rememberSpace, latestSpace } = await import("../src/spaceRegistry.js");
+const { addSchedule, loadAllSchedules, removeSchedule } = await import("../src/scheduleStore.js");
 
 const A = "111111111111111111";
 const B = "222222222222222222";
@@ -89,7 +89,7 @@ writeFileSync(path.join(legacy, "schedules.json"), JSON.stringify([
 ]), "utf8");
 writeFileSync(path.join(legacy, "guildRooms.json"), JSON.stringify({ [B]: { 1: "bbb-ccc-ddd" } }), "utf8");
 
-const legacyPaths = await import(`./src/dataPaths.js?v=${Date.now()}`);
+const legacyPaths = await import(`../src/dataPaths.js?v=${Date.now()}`);
 const moved = await legacyPaths.migrateLegacyData({ mainGuildId: A });
 say(`  moved: ${moved.length} group(s)`);
 check("legacy spaces -> main guild folder", existsSync(path.join(legacy, "guilds", A, "spaces.json")), true);

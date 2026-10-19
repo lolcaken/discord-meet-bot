@@ -1,13 +1,15 @@
 {
   "name": "discord-meet-bot",
-  "version": "1.0.0",
-  "description": "Discord bot that generates open-access Google Meet links via slash command.",
+  "version": "1.1.0",
+  "description": "Discord bot that generates open-access Google Meet links, with per-server standing rooms.",
   "type": "module",
-  "main": "src/index.js",
+  "main": "index.js",
   "scripts": {
+    "start": "node index.js",
     "auth": "node src/getToken.js",
     "deploy": "node src/deploy-commands.js",
-    "start": "node src/index.js"
+    "test": "node tests/run-all.mjs",
+    "config": "node scripts/show-config.mjs"
   },
   "engines": {
     "node": ">=18.0.0"

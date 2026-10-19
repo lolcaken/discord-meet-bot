@@ -1,4 +1,4 @@
-/**
+﻿/**
  * The /end identifier bug, exercised for real.
  *
  * Before the fix, /end code:ggv-nove-xkr built "spaces/ggv-nove-xkr" and
@@ -7,10 +7,10 @@
  */
 import "dotenv/config";
 import { writeFileSync } from "node:fs";
-import { getSpace, endActiveConference, createOpenMeetSpace } from "./src/googleMeet.js";
+import { getSpace, endActiveConference, createOpenMeetSpace } from "../src/googleMeet.js";
 
 const out = [];
-const say = (s) => { out.push(s); writeFileSync("endtest.txt", out.join("\n") + "\n", "utf8"); };
+const say = (s) => { out.push(s); writeFileSync(new URL("endtest.txt", import.meta.url), out.join("\n") + "\n", "utf8"); };
 
 // Same shape as resolveSpace() in index.js.
 const resolveViaCode = async (raw) => {

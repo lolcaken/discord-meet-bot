@@ -1,14 +1,14 @@
-/**
+﻿/**
  * The google-auth-library 9 -> 11 major bump must not have broken auth.
  * Exercises every API this project uses against the live Meet API.
  */
 import "dotenv/config";
 import { writeFileSync } from "node:fs";
 import { OAuth2Client } from "google-auth-library";
-import { createOpenMeetSpace, getSpace, listParticipants, warmUpAuth } from "./src/googleMeet.js";
+import { createOpenMeetSpace, getSpace, listParticipants, warmUpAuth } from "../src/googleMeet.js";
 
 const out = [];
-const say = (s) => { out.push(s); writeFileSync("auth-test.txt", out.join("\n") + "\n", "utf8"); };
+const say = (s) => { out.push(s); writeFileSync(new URL("auth-test.txt", import.meta.url), out.join("\n") + "\n", "utf8"); };
 
 let fail = 0;
 const check = (label, got, want) => {
