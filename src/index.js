@@ -1120,6 +1120,20 @@ async function handleCommand(interaction) {
       }
       return;
     }
+
+    // Reached only when no branch above claimed the command. Falling off the
+    // end without replying is what makes Discord show "This interaction
+    // failed": it waits 3s for an answer, gets nothing, and reports a bad
+    // request to the user. So an unrecognised command is answered explicitly
+    // instead - which is also the honest signal that the bot's registered
+    // commands and its handlers have drifted apart.
+    await logEvent("warn", "command.unknown", {
+      ...where(interaction),
+      command: interaction.commandName ?? null,
+      typed: Boolean(interaction.isTextCommand),
+      summary: `No handler for "${interaction.commandName ?? "(none)"}".`,
+    });
+    await safeReply(interaction, `I don't know that command: \`${interaction.commandName ?? "?"}\`.`);
   } catch (err) {
     // Belt-and-braces: whatever went wrong, don't let it escape and take
     // the bot down — log it and let the user know something failed.
