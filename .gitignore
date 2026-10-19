@@ -27,3 +27,4 @@ tests/*.txt
 .idea/
 *.swp
 .DS_Store
+COMMIT_MSG.txt
