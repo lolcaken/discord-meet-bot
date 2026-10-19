@@ -1,0 +1,21 @@
+# Keep shell scripts with Unix line endings, always.
+#
+# This is not optional. A .sh file with CRLF endings is broken on Linux:
+# bash reads "set -u\r" as an invalid option and "cd /home/container\r" as a
+# directory that doesn't exist, so the script dies on line one and the error
+# points at the wrong thing entirely.
+#
+# core.autocrlf=true (the Windows default) rewrites LF to CRLF on checkout,
+# which is exactly what broke the startup script. These rules override it for
+# anything that has to run on the server.
+*.sh text eol=lf
+
+# The same applies to the JSON the bot reads and the JavaScript it runs.
+# Node handles CRLF fine, but keeping them LF means the files the server runs
+# are byte-identical to the ones in git.
+*.js text eol=lf
+*.mjs text eol=lf
+*.json text eol=lf
+
+# Anything else: let git work it out, but don't try to be clever with binaries.
+* text=auto

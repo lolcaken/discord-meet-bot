@@ -22,6 +22,37 @@
 #   - The bot runs in the foreground, because the panel stops the server by
 #     sending a signal to the process it started.
 
+# Self-heal the line endings before anything else runs.
+#
+# A .sh file with Windows line endings is broken on Linux: bash reads
+# "set -u\r" as an invalid option and "cd /home/container\r" as a directory
+# that doesn't exist, so the script dies on its first line and the error
+# points at the wrong thing entirely. The file is normally LF (the repo
+# enforces it), but if it arrives with CRLF - from a Windows checkout, a drag
+# and drop, or an editor that "helpfully" adds them - this fixes it and
+# carries on.
+#
+# It re-runs a clean COPY rather than rewriting this file in place: bash is
+# partway through reading the script, and editing the file under it would
+# leave its read offset pointing at the wrong place.
+#
+# The CR is detected by stripping it and comparing, because grep cannot be
+# relied on to match a carriage return: "grep $'\r'" silently matches
+# nothing on some builds, which would make this check a no-op and the failure
+# look like it had never been tried.
+if tr -d '\r' < "$0" 2>/dev/null | cmp -s - "$0" 2>/dev/null; then
+  # The copy is identical to the original, so there was no CR to remove.
+  :
+else
+  echo "Fixing Windows line endings in start.sh..."
+  CLEAN="/tmp/.start.sh.$$"
+  if sed 's/\r$//' "$0" > "$CLEAN" 2>/dev/null; then
+    chmod +x "$CLEAN" 2>/dev/null || true
+    exec bash "$CLEAN" "$@"
+  fi
+  echo "Could not fix the line endings. Trying anyway..."
+fi
+
 set -u
 
 APP_DIR="/home/container"
