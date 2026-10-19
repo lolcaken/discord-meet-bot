@@ -2,6 +2,7 @@ import { appendFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/pr
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createWebhookQueue } from "./webhookQueue.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LOG_DIR = path.join(__dirname, "..", "logs");
@@ -18,13 +19,10 @@ const KEEP = 3;
 // slower every time.
 const MAX_ERRORS = 200;
 
-const WEBHOOK_TIMEOUT_MS = 8000;
-
 const COLORS = { info: 0x5865f2, warn: 0xfaa61a, error: 0xed4245 };
 const GLYPH = { info: "•", warn: "!", error: "x" };
 
 let dirReady = false;
-let webhookBlips = 0;
 
 async function ensureLogDir() {
   if (dirReady) return;
@@ -117,7 +115,19 @@ function buildEmbed(level, event, data) {
   };
 }
 
-async function postToWebhook(level, event, data) {
+/**
+ * One queue for the whole process, so posts are paced, ordered, and retried
+ * rather than fired in a burst that Discord rate-limits into silence. See
+ * webhookQueue.js for why that matters.
+ */
+let queue = null;
+
+function getQueue() {
+  if (!queue) queue = createWebhookQueue();
+  return queue;
+}
+
+function postToWebhook(level, event, data) {
   // Errors can be routed somewhere louder without duplicating everything.
   const url =
     level === "error" && process.env.DISCORD_ERROR_WEBHOOK_URL
@@ -125,39 +135,12 @@ async function postToWebhook(level, event, data) {
       : process.env.DISCORD_LOG_WEBHOOK_URL;
   if (!url) return;
 
-  try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: "meetbot", embeds: [buildEmbed(level, event, data)] }),
-      signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
-    });
-
-    if (response.ok) return;
-    if (response.status === 429) {
-      // Discord is rate limiting the webhook itself. Log it once and move on
-      // rather than retrying, which would make it worse.
-      const body = await response.text().catch(() => "");
-      console.error("Webhook rate limited; dropping this log line:", body.slice(0, 120));
-      return;
-    }
-    console.error(`Webhook log failed (${response.status}):`, await response.text().catch(() => ""));
-  } catch (err) {
-    // Usually the host's own network, not the webhook: a refused connection to
-    // Cloudflare says the box can't reach Discord, which is worth naming rather
-    // than leaving as a bare "fetch failed".
-    const code = err?.code ?? err?.cause?.code ?? err?.errors?.[0]?.code ?? null;
-    console.error(
-      `Webhook log failed (${code ?? "network"}): ${String(err?.message ?? err).slice(0, 120)}`
-    );
-    webhookBlips++;
-    // The file log already has this line, so one console line per failure is
-    // enough; only speak up if it keeps happening.
-    if (webhookBlips === 5) {
-      console.error("Webhook has failed 5 times - is this host able to reach Discord at all?");
-    }
-  }
+  getQueue().enqueue({ url, event, embed: buildEmbed(level, event, data) });
 }
+
+/** Live webhook counters, for tests and diagnostics. */
+export const webhookStats = () =>
+  queue ? queue.stats() : { pending: 0, dropped: 0, retries: 0, rateLimits: 0, disabledReason: null };
 
 /**
  * The single entry point for everything the bot records.
@@ -174,7 +157,9 @@ async function postToWebhook(level, event, data) {
 export async function logEvent(level, event, data = {}) {
   const safeLevel = COLORS[level] ? level : "info";
   await writeToFile(safeLevel, event, data);
-  void postToWebhook(safeLevel, event, data);
+  // Enqueues and returns; the queue drains on its own clock, so a slow or
+  // rate-limited Discord never adds latency to whatever the user is waiting on.
+  postToWebhook(safeLevel, event, data);
 }
 
 export const logReady = (data) => logEvent("info", "bot.ready", data);

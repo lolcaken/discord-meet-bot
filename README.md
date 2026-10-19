@@ -209,8 +209,23 @@ Errors also land in `logs/errorlog.json` as a single JSON array, newest first, s
 `jq` or any dashboard can read them without parsing a log format. It's capped at the
 most recent 200, because it's rewritten whole on each error.
 
-The webhook is fired without being awaited, so a slow Discord never delays a reply, and
-a rate-limited webhook is dropped with one console line rather than retried.
+The webhook is fed through a single serialised queue, so a slow Discord never delays a
+reply but nothing is lost either. Posts are paced just under Discord's 30/minute ceiling,
+and if one is rate-limited anyway the whole queue pauses for exactly as long as Discord's
+`retry_after` asks and then resumes — the line is delivered, not dropped. A deleted or
+unauthorised webhook (`404`/`401`/`403`) disables posting once with a single console line
+instead of retrying forever; transient `5xx`/network failures back off and give up after
+a few tries. The queue is capped, and on overflow the oldest entry is dropped (counted,
+not silent). Tuning knobs, all optional:
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `LOG_WEBHOOK_MAX_PER_MINUTE` | `28` | Pace of outgoing posts |
+| `LOG_WEBHOOK_QUEUE_MAX` | `200` | Entries held before the oldest is dropped |
+| `LOG_WEBHOOK_MAX_ATTEMPTS` | `5` | Retries for a single post before giving up |
+
+Run `node -e "import('./src/logger.js').then(m=>console.log(m.webhookStats()))"` to see
+the live pending/dropped/retry counters.
 
 ## Setup
 
