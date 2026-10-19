@@ -27,7 +27,7 @@ const ALIASES = { cd: "meet" };
 // PRELOADED_MEETS, which keeps this from needing to know the slot count.
 const PRELOADED = /^meet([2-9]|[1-9][0-9]+)$/;
 
-const KNOWN = new Set(["meet", "rand", "last"]);
+const KNOWN = new Set(["meet", "rand", "last", "servers"]);
 
 export function parseTextCommand(content) {
   if (typeof content !== "string") return null;

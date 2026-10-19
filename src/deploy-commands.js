@@ -82,4 +82,13 @@ const commands = [
     .setIntegrationTypes(INTEGRATION_TYPES)
     .setContexts(CONTEXTS)
     .toJSON(),
+
+  // Deliberately guild-only and not user-installable: it names every server
+  // the bot is in, which isn't something to expose in a DM or to a user install.
+  new SlashCommandBuilder()
+    .setName("servers")
+    .setDescription("List every server this bot is in (main server only)")
+    .setIntegrationTypes([ApplicationIntegrationType.GuildInstall])
+    .setContexts([InteractionContextType.Guild])
+    .toJSON(),
 ];

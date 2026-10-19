@@ -22,6 +22,7 @@ import { withRetry, isTransient } from "./retry.js";
 import { countServicedGuilds, resolveGuildRoom, seedGuildRooms } from "./guildRooms.js";
 import { migrateLegacyData } from "./dataPaths.js";
 import { writeGuildInfo, writeUserInfo, refreshAllGuildInfo } from "./scopeInfo.js";
+import { rebuild as rebuildInventory, render as renderInventory } from "./inventory.js";
 import { refreshAllReports } from "./scopeReports.js";
 import { PRELOADED_MEETS } from "./preloadedMeets.js";
 import { parseTextCommand } from "./textCommands.js";
@@ -529,6 +530,25 @@ client.once("ready", async () => {
 
   // Name the data folders, so reading one off disk says which server it is.
   const described = await refreshAllGuildInfo(client, { isMainGuild });
+
+  // Reconstruct the whole picture from the live gateway: make sure every
+  // server the bot is in has its folder back (re-seeding the main guild's
+  // standing rooms from source), and write data/guilds.json as the single
+  // answer to "which servers is this bot in". Rebuilding from Discord rather
+  // than a stored list is the point - a lost disk can't take the inventory
+  // with it, because the gateway is the source of truth for this.
+  const inventory = await rebuildInventory(client, {
+    isMainGuild,
+    seeds: PRELOADED_MEETS,
+    mainGuildId: MAIN_GUILD_ID,
+  });
+  const restored = inventory.ensured.filter((e) => e.seeded).length;
+  if (inventory.ensured.length) {
+    console.log(
+      `📁 Data rebuilt for ${inventory.ensured.length} server(s), ${restored} standing room(s) restored.`
+    );
+  }
+
   const reports = await refreshAllReports();
 
   await logReady({
@@ -540,11 +560,12 @@ client.once("ready", async () => {
     pendingSchedules: pending,
     serversWithRooms: serviced,
     serversDescribed: described,
+    serversInBot: inventory.rows.length,
     reportScopes: reports.scopes,
     reportFiles: reports.files,
     migrated: migrated.length ? migrated.join("; ") : null,
     node: process.version,
-    summary: `Ready. Main guild ${MAIN_GUILD_ID || "(unset)"}; pool ${poolSize()}; ${described} server(s) described; ${pending} schedule(s) pending.`,
+    summary: `Ready. Main guild ${MAIN_GUILD_ID || "(unset)"}; pool ${poolSize()}; in ${inventory.rows.length} server(s); ${described} server(s) described; ${pending} schedule(s) pending.`,
   });
 
   setInterval(scanAndArm, RECHECK_INTERVAL_MS);
@@ -562,8 +583,35 @@ client.once("ready", async () => {
 client.on("guildCreate", async (guild) => {
   try {
     await writeGuildInfo(guild, { isMainGuild: isMainGuild(guild.id) });
+    // And the inventory, so a server joining is reflected in the on-disk list
+    // immediately rather than at the next boot.
+    await rebuildInventory(client, { isMainGuild, mainGuildId: MAIN_GUILD_ID });
+    await logEvent("info", "guild.joined", {
+      guildId: guild.id,
+      guildName: guild.name ?? null,
+      memberCount: guild.memberCount ?? null,
+      isMainGuild: isMainGuild(guild.id),
+      totalServers: client.guilds.cache.size,
+      summary: `Joined ${guild.name ?? guild.id} (now in ${client.guilds.cache.size} server(s)).`,
+    });
   } catch (err) {
     console.error(`Couldn't record info for joined server ${guild.id}:`, err.message);
+  }
+});
+
+// Being removed from a server is worth recording: the folder on disk is kept
+// (its history is still readable), but the inventory stops claiming we're there.
+client.on("guildDelete", async (guild) => {
+  try {
+    await rebuildInventory(client, { isMainGuild, mainGuildId: MAIN_GUILD_ID });
+    await logEvent("warn", "guild.left", {
+      guildId: guild.id,
+      guildName: guild.name ?? null,
+      totalServers: client.guilds.cache.size,
+      summary: `Removed from ${guild.name ?? guild.id}; now in ${client.guilds.cache.size} server(s).`,
+    });
+  } catch (err) {
+    console.error(`Couldn't update inventory after leaving ${guild.id}:`, err.message);
   }
 });
 
@@ -701,6 +749,33 @@ function checkAllowed(interaction) {
  * path and the plain-text path run identical code. Only these members are
  * touched, which is what lets a Message be adapted into an interaction.
  */
+/**
+ * `/servers`: every server the bot is in, rebuilt fresh.
+ *
+ * Main guild only. The answer includes every server the bot sits in, which may
+ * include servers its owner would rather keep quiet, so it isn't something a
+ * member of any random server gets to ask.
+ */
+async function handleServers(interaction) {
+  if (!isMainGuild(interaction.guildId)) {
+    await safeReply(interaction, "Servers can only be listed from the main server.");
+    return;
+  }
+
+  const { rows } = await rebuildInventory(client, {
+    isMainGuild,
+    seeds: PRELOADED_MEETS,
+    mainGuildId: MAIN_GUILD_ID,
+  });
+
+  await safeReply(interaction, renderInventory(rows));
+  await logEvent("info", "inventory.listed", {
+    ...where(interaction),
+    servers: rows.length,
+    summary: `Listed ${rows.length} server(s) the bot is in.`,
+  });
+}
+
 async function handleCommand(interaction) {
   {
     try {
@@ -741,6 +816,12 @@ async function handleCommand(interaction) {
       // anything that could create a room, so it never mints or spends quota.
       if (name === "last") {
         await handleLast(interaction);
+        return;
+      }
+
+      // `servers` lists every server the bot is in; main guild only.
+      if (name === "servers") {
+        await handleServers(interaction);
         return;
       }
 
@@ -892,6 +973,11 @@ async function handleCommand(interaction) {
             "on the Google Cloud project."
         );
       }
+      return;
+    }
+
+    if (interaction.commandName === "servers") {
+      await handleServers(interaction);
       return;
     }
 

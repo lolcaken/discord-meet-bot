@@ -46,6 +46,7 @@ instead.
 | `meet2` `meet3` `meet4` | — | The other standing rooms |
 | `rand` | `/rand` | A brand new link from the pool |
 | `last` | — | Re-posts the latest meeting that has people in it |
+| `servers` | `/servers` | Lists every server the bot is in |
 | — | `/meet` | A brand new link, plus an `@everyone` ping |
 | — | `/schedule minutes:30 title:"Standup"` | Posts a fresh link later, up to 7 days out |
 | — | `/end` | Ends the live call, dropping everyone still in it |
@@ -67,6 +68,23 @@ actually sitting in. If nobody's in any meeting, it says so.
 
 `last` is **servers only** (there's no server to search in a DM) and **type-only**
 (no `/last`). It checks up to 5 recent meetings, and never mints a new link.
+
+### `servers` — where is the bot?
+
+`servers` (or `/servers`) answers "which servers is this bot actually in?" — the name,
+the id, the member count, whether it's the main server, and how many standing rooms it
+has. It rebuilds the answer from Discord each time rather than trusting a stored list,
+so it stays correct even if the files on disk are lost.
+
+Main server only. The reply names every server the bot sits in, which isn't something
+to hand to a member of any random server, so `/servers` is guild-only and won't install
+into DMs.
+
+Every boot also writes `data/guilds.json` with the same information and re-creates any
+missing per-server folder, seeding the main server's four standing rooms back from
+source. Room codes you edited by hand are never overwritten. Joining or leaving a server
+updates both the file and the log immediately, so `guild.joined` and `guild.left` in
+`logs/activity.log` tell you the moment it happens.
 
 ### Live participant count
 
