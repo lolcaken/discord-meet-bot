@@ -17,7 +17,9 @@ import {
 } from "./googleMeet.js";
 import { initPool, takeMeeting, poolSize } from "./meetingPool.js";
 import { addSchedule, loadAllSchedules, removeSchedule } from "./scheduleStore.js";
-import { rememberSpace, latestSpace, recentSpaces } from "./spaceRegistry.js";
+import { rememberSpace, latestSpace, allSpaces } from "./spaceRegistry.js";
+import { liveMeetingsEverywhere, rosterEverywhere, renderRoster, renderLiveMeetings } from "./globalMeetings.js";
+import { isOwner, OWNER_ONLY_MESSAGE } from "./owner.js";
 import { withRetry, isTransient } from "./retry.js";
 import { countServicedGuilds, resolveGuildRoom, seedGuildRooms } from "./guildRooms.js";
 import { migrateLegacyData } from "./dataPaths.js";
@@ -224,9 +226,6 @@ const meetPost = (uri, label) => ({
   allowedMentions: { parse: ["everyone"] },
 });
 
-/** How many recorded spaces `last` will check before giving up. */
-const LAST_SCAN_LIMIT = 5;
-
 /**
  * The marker `last` puts above the link. Just a word between dashes, sitting
  * where a title would sit — quiet enough that the ping and the link still lead,
@@ -235,12 +234,13 @@ const LAST_SCAN_LIMIT = 5;
 const LATEST_LABEL = "- latest -";
 
 /**
- * Finds the most recent meeting that actually has people in it.
+ * `last`: the most recent meeting that actually has people in it.
  *
- * Scans backwards through the recorded spaces rather than only looking at the
- * newest: a second /meet that nobody joined would otherwise hide the call
- * several people are still sitting in, which is the exact situation `last`
- * exists for.
+ * Scans every meeting the bot has handed out in this server, newest first,
+ * rather than just the newest few: a second /meet that nobody joined would
+ * otherwise hide the call several people are still sitting in, which is the
+ * exact situation `last` exists for. A meeting posted in another channel of
+ * the same server counts just as much as one in the channel you typed in.
  */
 async function handleLast(interaction) {
   // Typed-only and server-only: a DM has no server to search, so nothing to do.
@@ -262,7 +262,7 @@ async function handleLast(interaction) {
   markPosted("preloaded", interaction.channelId);
 
   const scope = scopeOf(interaction);
-  const candidates = await recentSpaces(scope, interaction.channelId, LAST_SCAN_LIMIT);
+  const candidates = await allSpaces(scope);
 
   let checked = 0;
   let unreadable = 0;
@@ -316,6 +316,61 @@ async function handleLast(interaction) {
     checked,
     unreadable,
     summary: `Checked ${checked} recorded space(s), nobody is in one.`,
+  });
+}
+
+/**
+ * The owner's-only commands.
+ *
+ * `roster`      - everyone who has used the bot, in this server
+ * `globalroster`- the same, across every server the bot is in
+ * `globallast`  - every live meeting, across every server the bot is in
+ *
+ * These see everything the bot can see, so they belong to the owner. Anyone
+ * else asking gets one line naming who to ask, and the owner is pinged once
+ * so the refusal isn't a dead end.
+ */
+async function handleOwnerOnly(interaction, kind) {
+  if (!isOwner(interaction.user?.id)) {
+    await safeReply(interaction, OWNER_ONLY_MESSAGE);
+    await logEvent("warn", "command.denied", {
+      ...where(interaction),
+      command: kind,
+      reason: "owner-only command",
+      summary: `Someone other than the owner tried to run ${kind}.`,
+    });
+    return;
+  }
+
+  if (kind === "globalroster") {
+    const rows = await rosterEverywhere(client);
+    await safeReply(interaction, renderRoster(rows));
+    await logEvent("info", "roster.listed", {
+      ...where(interaction),
+      servers: rows.length,
+      summary: `Listed the roster for ${rows.length} server(s).`,
+    });
+    return;
+  }
+
+  if (kind === "globallast") {
+    const found = await liveMeetingsEverywhere(client);
+    await safeReply(interaction, renderLiveMeetings(found));
+    await logEvent("info", "global.last.listed", {
+      ...where(interaction),
+      servers: found.length,
+      summary: `Listed ${found.length} live meeting(s) across all servers.`,
+    });
+    return;
+  }
+
+  // roster
+  const rows = await rosterEverywhere(client, { scope: interaction.guildId });
+  await safeReply(interaction, renderRoster(rows));
+  await logEvent("info", "roster.listed", {
+    ...where(interaction),
+    servers: rows.length,
+    summary: `Listed the roster for this server.`,
   });
 }
 
@@ -819,6 +874,13 @@ async function handleCommand(interaction) {
         return;
       }
 
+      // The owner's own commands. The gate lives in the handler, so a
+      // non-owner gets a clear refusal rather than silence.
+      if (name === "roster" || name === "globalroster" || name === "globallast") {
+        await handleOwnerOnly(interaction, name);
+        return;
+      }
+
       // `servers` lists every server the bot is in; main guild only.
       if (name === "servers") {
         await handleServers(interaction);
@@ -978,6 +1040,17 @@ async function handleCommand(interaction) {
 
     if (interaction.commandName === "servers") {
       await handleServers(interaction);
+      return;
+    }
+
+    // The owner's own commands. Discord hides these from everyone else, but
+    // the handler checks anyway - typed text reaches here too.
+    if (
+      interaction.commandName === "roster" ||
+      interaction.commandName === "globalroster" ||
+      interaction.commandName === "globallast"
+    ) {
+      await handleOwnerOnly(interaction, interaction.commandName);
       return;
     }
 

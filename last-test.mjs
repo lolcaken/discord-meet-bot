@@ -34,12 +34,13 @@ check("rand", parseTextCommand("rand"), cmd("rand"));
 check("meet2", parseTextCommand("meet2"), cmd("meet2"));
 check("/last is not a typed command", parseTextCommand("/last"), null);
 
-say("\n--- candidate ordering: this channel first, then the server ---");
+say("\n--- every meeting in the server is a candidate ---");
 const tmp = mkdtempSync(path.join(tmpdir(), "meetbot-last-"));
 process.env.DATA_DIR = tmp;
-const { recentSpaces } = await import("./src/spaceRegistry.js");
+const { allSpaces, spacesForEveryGuild } = await import("./src/spaceRegistry.js");
 
 const G = "111111111111111111";
+const G2 = "222222222222222222";
 const chan = (n, code, channelId) => ({ name: `spaces/${code}`, code, uri: `https://meet.google.com/${code}`, channelId });
 
 // spaces.json is stored newest-first.
@@ -54,12 +55,44 @@ writeFileSync(
   "utf8"
 );
 
-const picks = await recentSpaces({ guildId: G }, "chan-A", 5);
-check("channel A entries come first", picks.map((p) => p.code), ["older-here", "oldest-here", "newest-other"]);
-check("limit is honoured", (await recentSpaces({ guildId: G }, "chan-A", 2)).length, 2);
-check("no channel still lists newest first",
-  (await recentSpaces({ guildId: G }, null, 5)).map((p) => p.code), ["newest-other", "older-here", "oldest-here"]);
-check("unknown scope is empty", await recentSpaces({ guildId: "222222222222222222" }, "chan-A"), []);
+const all = await allSpaces({ guildId: G });
+check("every space is returned", all.length, 3);
+check("newest first, no channel preference",
+  all.map((p) => p.code), ["newest-other", "older-here", "oldest-here"]);
+check("unknown scope is empty", await allSpaces({ guildId: G2 }), []);
+check("a second guild's spaces are separate", await allSpaces({ guildId: G2 }), []);
+
+say("\n--- a second server with meetings is found too ---");
+mkdirSync(path.join(tmp, "guilds", G2), { recursive: true });
+writeFileSync(
+  path.join(tmp, "guilds", G2, "spaces.json"),
+  JSON.stringify([chan(1, "other-guild-one", "chan-Z")]),
+  "utf8"
+);
+
+const every = await spacesForEveryGuild();
+check("both servers are listed", every.length, 2);
+check("the first server's spaces are there",
+  every.find((s) => s.guildId === G).entries.length, 3);
+check("the second server's spaces are there",
+  every.find((s) => s.guildId === G2).entries.length, 1);
+
+say("\n--- a guild with no meetings is not listed ---");
+mkdirSync(path.join(tmp, "guilds", "333333333333333333"), { recursive: true });
+const after = await spacesForEveryGuild();
+check("an empty server is skipped", after.length, 2);
+
+say("\n--- DM scopes are not servers ---");
+mkdirSync(path.join(tmp, "dms", "444444444444444444"), { recursive: true });
+writeFileSync(
+  path.join(tmp, "dms", "444444444444444444", "spaces.json"),
+  JSON.stringify([chan(1, "dm-one", "dm")]),
+  "utf8"
+);
+const withDm = await spacesForEveryGuild();
+check("a DM scope is not counted as a server", withDm.length, 2);
+check("the DM's meeting is not in the server list",
+  withDm.some((s) => s.entries.some((e) => e.code === "dm-one")), false);
 
 say(`\n${fail === 0 ? "ALL PASSED" : fail + " FAILED"}`);
 rmSync(tmp, { recursive: true, force: true });

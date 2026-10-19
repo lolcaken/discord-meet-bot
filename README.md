@@ -47,6 +47,9 @@ instead.
 | `rand` | `/rand` | A brand new link from the pool |
 | `last` | — | Re-posts the latest meeting that has people in it |
 | `servers` | `/servers` | Lists every server the bot is in |
+| `roster` | `/roster` | Who has used the bot here (owner only) |
+| `globalroster` | `/globalroster` | Who has used the bot, everywhere (owner only) |
+| `globallast` | `/globallast` | Live meetings across every server (owner only) |
 | — | `/meet` | A brand new link, plus an `@everyone` ping |
 | — | `/schedule minutes:30 title:"Standup"` | Posts a fresh link later, up to 7 days out |
 | — | `/end` | Ends the live call, dropping everyone still in it |
@@ -62,12 +65,37 @@ it, then posts it — the same `@everyone` ping and link as a `meet` post, with 
 `- latest -` line above the link to show it's a repost, and the same live `👤` headcount
 underneath that keeps ticking.
 
-It looks back through recent meetings rather than only the newest one, so if someone
-fires a second `/meet` that nobody joins, `last` skips past it to the call people are
-actually sitting in. If nobody's in any meeting, it says so.
+It checks **every** meeting the bot has handed out in that server, newest first — not
+just the recent ones, and not just the channel you typed in. A second `/meet` that
+nobody joined, or a call posted in another channel of the same server, no longer hides
+the one people are actually sitting in. If nobody's in any meeting, it says so.
 
 `last` is **servers only** (there's no server to search in a DM) and **type-only**
-(no `/last`). It checks up to 5 recent meetings, and never mints a new link.
+(no `/last`).
+
+### `roster`, `globalroster`, `globallast` — the owner's commands
+
+Three commands that see everything the bot can see, so they're the owner's alone. Anyone
+else who asks gets one line naming who to ask, and the owner is mentioned once so the
+refusal isn't a dead end:
+
+```
+this command only avalible to daddy moath <@970921305899687967>
+```
+
+| Command | What it shows |
+| --- | --- |
+| `roster` | Who has used the bot in this server, and how many meetings each asked for |
+| `globalroster` | The same, across every server the bot is in |
+| `globallast` | Every live meeting, across every server the bot is in, with who and how many |
+
+Discord hides all three from other people entirely (`setDefaultMemberPermissions(0)`),
+so they don't even appear in anyone's command palette — but the bot still checks, because
+plain text reaches the same handler.
+
+The roster is built from the bot's own record of who asked for each meeting, not
+Discord's member list, which the bot can't read without a privileged intent. Servers
+are listed busiest first, so the order doesn't shuffle between runs.
 
 ### `servers` — where is the bot?
 

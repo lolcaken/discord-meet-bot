@@ -1,4 +1,4 @@
-import { fileIn, readJson, writeJson } from "./dataPaths.js";
+import { fileIn, readJson, writeJson, listScopes } from "./dataPaths.js";
 
 /**
  * Meetings the bot handed out, one file per server (or per DM user), so
@@ -46,17 +46,34 @@ export async function latestSpace(scope, channelId) {
 }
 
 /**
- * Recent spaces, newest first, for the `last` command to search.
+ * Every space in a scope, newest first, with no limit and no channel
+ * preference.
  *
- * Spaces from the channel the command was typed in come first, then the rest
- * of the server, so the meeting people are actually talking about wins over a
- * newer one that happens to have been posted elsewhere.
+ * `last` uses this rather than a "recent few" list: the point of `last` is
+ * "wherever people are right now", and a meeting posted in another channel of
+ * the same server is just as real as one in the channel you happen to be
+ * typing in.
  */
-export async function recentSpaces(scope, channelId, limit = 5) {
+export async function allSpaces(scope) {
   const entries = await readJson(file(scope), []);
-  if (!Array.isArray(entries) || !entries.length) return [];
+  return Array.isArray(entries) ? entries : [];
+}
 
-  const inChannel = channelId ? entries.filter((e) => e?.channelId === channelId) : [];
-  const elsewhere = entries.filter((e) => !inChannel.includes(e));
-  return [...inChannel, ...elsewhere].slice(0, limit);
+/**
+ * Every guild scope that has ever handed out a meeting, with its spaces.
+ *
+ * This is what the global commands walk: the bot may be in a dozen servers,
+ * and each keeps its own spaces.json. DM scopes are skipped - a DM meeting
+ * isn't a server meeting, and the owner asking "what servers am I in" means
+ * servers.
+ */
+export async function spacesForEveryGuild() {
+  const scopes = await listScopes();
+  const out = [];
+  for (const scope of scopes) {
+    if (!scope.guildId) continue;
+    const entries = await allSpaces({ guildId: scope.guildId });
+    if (entries.length) out.push({ guildId: scope.guildId, entries });
+  }
+  return out;
 }

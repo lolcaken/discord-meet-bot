@@ -59,7 +59,9 @@ const build = new Function(
     safeReply, logEvent, logFailure, logDenied, logBlocked, logMeetCreated,
     logScheduled, logEnded, logReady, secondsLeft, cooldownRemaining,
     markPosted, scopeOf, where, resolveGuildRoom, getOrCreateGuildRoom,
-    meetPost, watchParticipants, rememberSpace, latestSpace, recentSpaces,
+    meetPost, watchParticipants, rememberSpace, latestSpace, allSpaces,
+    liveMeetingsEverywhere, rosterEverywhere, renderRoster, renderLiveMeetings,
+    isOwner, OWNER_ONLY_MESSAGE, handleOwnerOnly,
     getSpace, listParticipants, endActiveConference, takeMeetingWithCooldown,
     resolveSpace, rebuildInventory, renderInventory, apiHint, NO_MEETING,
     checkAllowed, MAX_SCHEDULE_MINUTES, describeScope,
@@ -72,16 +74,25 @@ const build = new Function(
 
 const noop = () => {};
 const errors = [];
+/** Swappable so the owner-handler test can observe what it was asked for. */
+let ownerHandler = noop;
 const deps = {
   isMainGuild: () => true, MAIN_GUILD_ID: "1550540829112795187", PRELOADED_MEETS: {},
   handleLast: noop, handleServers: noop,
+  // Delegated so a test can swap the implementation after the function is
+  // built - build() destructures deps, so reassigning deps.handleOwnerOnly
+  // later would not reach it.
+  handleOwnerOnly: (...args) => ownerHandler(...args),
   safeReply: async (i, p) => { i.reply(p); },
   logEvent: noop, logFailure: (d) => { errors.push(d); }, logDenied: noop, logBlocked: noop,
   logMeetCreated: noop, logScheduled: noop, logEnded: noop, logReady: noop,
   secondsLeft: () => "5", cooldownRemaining: () => 0, markPosted: noop,
   scopeOf: () => ({ guildId: "1550540829112795187" }), where: () => ({}),
   resolveGuildRoom: noop, getOrCreateGuildRoom: noop, meetPost: () => ({}),
-  watchParticipants: noop, rememberSpace: noop, latestSpace: noop, recentSpaces: noop,
+  watchParticipants: noop, rememberSpace: noop, latestSpace: noop, allSpaces: noop,
+  liveMeetingsEverywhere: noop, rosterEverywhere: noop,
+  renderRoster: () => "", renderLiveMeetings: () => "",
+  isOwner: () => false, OWNER_ONLY_MESSAGE: "owner only",
   getSpace: noop, listParticipants: noop, endActiveConference: noop,
   takeMeetingWithCooldown: noop, resolveSpace: noop,
   rebuildInventory: noop, renderInventory: () => "", apiHint: () => "", NO_MEETING: "",
@@ -101,19 +112,35 @@ try {
 
 say("=== an unknown command must still answer ===");
 const a = mk();
+a.interaction.commandName = "notacommand";
 await handleCommand(a.interaction);
 check("it replied", a.replies.length > 0, `${a.replies.length} reply`);
 const body = typeof a.replies[0] === "string" ? a.replies[0] : a.replies[0]?.content ?? "";
-check("the reply names the command", body.includes("roster"), body.slice(0, 60));
+check("the reply names the command", body.includes("notacommand"), body.slice(0, 60));
 check("it did not hang", true);
 if (errors.length) say(`      failure detail: ${JSON.stringify(errors[errors.length - 1]).slice(0, 240)}`);
 
 say("\n=== different unknown commands all answer ===");
-for (const name of ["roster", "history", "artifacts", "notacommand"]) {
+// "roster" and friends are real commands now, so they are not in this list.
+for (const name of ["history", "artifacts", "notacommand", "xyzzy"]) {
   const m = mk();
   m.interaction.commandName = name;
   await handleCommand(m.interaction);
   check(`"${name}" replies`, m.replies.length === 1, `${m.replies.length}`);
+}
+
+say("\n=== the owner's commands are not treated as unknown ===");
+{
+  // They must reach the owner handler, which is stubbed, and must NOT fall
+  // through to the "I don't know that command" reply.
+  const seen = [];
+  ownerHandler = async (i, kind) => { seen.push(kind); };
+  const m = mk();
+  m.interaction.commandName = "roster";
+  await handleCommand(m.interaction);
+  check("roster went to the owner handler", seen.includes("roster"), JSON.stringify(seen));
+  check("and did not hit the unknown-command reply",
+    m.replies.every((r) => !String(r?.content ?? r).includes("don't know")), true);
 }
 
 say("\n=== a command with no name at all still answers ===");

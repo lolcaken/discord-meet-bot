@@ -91,4 +91,32 @@ const commands = [
     .setIntegrationTypes([ApplicationIntegrationType.GuildInstall])
     .setContexts([InteractionContextType.Guild])
     .toJSON(),
+
+  // Owner-only, and Discord enforces that too: setDefaultMemberPermissions to
+  // 0 means the command is invisible and unusable to everyone else, so nobody
+  // in any server even sees it in the palette. The handler still checks, in
+  // case someone types it as plain text.
+  new SlashCommandBuilder()
+    .setName("roster")
+    .setDescription("Show who has used the bot in this server (owner only)")
+    .setIntegrationTypes([ApplicationIntegrationType.GuildInstall])
+    .setContexts([InteractionContextType.Guild])
+    .setDefaultMemberPermissions(0)
+    .toJSON(),
+
+  new SlashCommandBuilder()
+    .setName("globalroster")
+    .setDescription("Show who has used the bot across every server (owner only)")
+    .setIntegrationTypes([ApplicationIntegrationType.GuildInstall])
+    .setContexts([InteractionContextType.Guild])
+    .setDefaultMemberPermissions(0)
+    .toJSON(),
+
+  new SlashCommandBuilder()
+    .setName("globallast")
+    .setDescription("Show every live meeting across every server (owner only)")
+    .setIntegrationTypes([ApplicationIntegrationType.GuildInstall])
+    .setContexts([InteractionContextType.Guild])
+    .setDefaultMemberPermissions(0)
+    .toJSON(),
 ];

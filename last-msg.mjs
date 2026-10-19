@@ -64,7 +64,9 @@ check("never mints a space", handler.includes("createOpenMeetSpace") === false, 
 check("skips spaces with no conference", handler.includes("if (!space?.activeConference) continue"), true);
 check("skips unreadable spaces", handler.includes("unreadable++"), true);
 check("stops at the first one with people", /if \(count === 0\) continue;[\s\S]*?await safeReply/.test(handler), true);
-check("scan is bounded", /const LAST_SCAN_LIMIT = (\d+);/.exec(src)[1], "5");
+check("scans every meeting in the server", handler.includes("await allSpaces(scope)"), true);
+check("no scan limit remains", /LAST_SCAN_LIMIT/.test(src), false);
+check("no channel preference remains", /recentSpaces/.test(src), false);
 check("shares the 5s cooldown", handler.includes('cooldownRemaining("preloaded"'), true);
 check("logs when it finds one", handler.includes("last.posted"), true);
 check("logs when it doesn't", handler.includes("last.empty"), true);
@@ -78,7 +80,7 @@ check("four call sites pass no label", others.length, 4);
 check("no emoji crept into any meet post", glyph.test(plain.content), false);
 
 say("\n--- wired into the typed path ---");
-check("parser knows the word", readFileSync("src/textCommands.js", "utf8").includes('"meet", "rand", "last"'), true);
+check("parser knows the word", /"last"/.test(readFileSync("src/textCommands.js", "utf8")), true);
 check("dispatched before the meet regex",
   src.indexOf('if (name === "last")') < src.indexOf("const slot = /^meet"), true);
 check("returns after handling", /if \(name === "last"\) \{\s*await handleLast\(interaction\);\s*return;/.test(src), true);
