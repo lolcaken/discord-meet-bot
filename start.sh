@@ -55,9 +55,11 @@ fi
 
 set -u
 
-APP_DIR="/home/container"
-NODE="/usr/local/bin/node"
-NPM="/usr/local/bin/npm"
+# Where the app lives. The host runs it in /home/container, but this can be
+# overridden so the script can be tested anywhere.
+APP_DIR="${APP_DIR:-/home/container}"
+NODE="${NODE:-/usr/local/bin/node}"
+NPM="${NPM:-/usr/local/bin/npm}"
 
 cd "$APP_DIR" || exit 1
 
