@@ -15,7 +15,8 @@
     "servers": true,
     "roster": true,
     "globalroster": true,
-    "globallast": true
+    "globallast": true,
+    "giverole": true
   },
 
   "features": {

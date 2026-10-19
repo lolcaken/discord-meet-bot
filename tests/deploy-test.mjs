@@ -44,7 +44,7 @@ const deploySrc = readFileSync(new URL("../src/deploy-commands.js", import.meta.
 const commandBlocks = deploySrc.split("new SlashCommandBuilder()").slice(1);
 const names = commandBlocks.map((b) => /setName\("([a-z]+)"\)/.exec(b)?.[1]).filter(Boolean);
 const unique = [...new Set(names)];
-check("eight commands are defined", unique.length, 8);
+check("nine commands are defined", unique.length, 9);
 check("no duplicate command names", unique.length, names.length);
 check("the new ones are there",
   ["roster", "globalroster", "globallast", "servers"].every((n) => unique.includes(n)), true);
@@ -61,11 +61,11 @@ for (const name of ["roster", "globalroster", "globallast"]) {
 
 say("\n--- the deploy is idempotent ---");
 const first = await registerCommands();
-check("it registered", first.count, 8);
+check("it registered", first.count, 9);
 check("it hit Discord twice: the guild and globally", calls.length, 2);
 check("one call was the guild", calls[0].route.includes("/guilds/"), true);
 check("one call was global", calls[1].route.includes("/commands"), true);
-check("all eight commands were sent", calls[0].body.length, 8);
+check("all nine commands were sent", calls[0].body.length, 9);
 check("the sent body is plain JSON, not builders",
   typeof calls[0].body[0], "object");
 
@@ -89,7 +89,7 @@ check("no extra API call was made", calls.length, callsBefore);
 
 say("\n--- a changed command list does register again ---");
 const forced = await registerCommands({ force: true });
-check("it registered", forced.count, 8);
+check("it registered", forced.count, 9);
 check("and it called Discord again", calls.length, callsBefore + 2);
 
 REST.prototype.put = realPut;

@@ -8,6 +8,7 @@ import {
   SlashCommandBuilder,
   ApplicationIntegrationType,
   InteractionContextType,
+  PermissionsBitField,
 } from "discord.js";
 import { readJson, writeJson, DATA_ROOT } from "./dataPaths.js";
 import { commandEnabled, loadConfig, configPath, hasConfigFile } from "./config.js";
@@ -151,6 +152,34 @@ const ALL_COMMANDS = [
     .setIntegrationTypes([ApplicationIntegrationType.GuildInstall])
     .setContexts([InteractionContextType.Guild])
     .setDefaultMemberPermissions(0)
+    .toJSON(),
+
+  // Guild-only and requires Manage Roles, so Discord only shows it to people
+  // who could already hand out roles through the server's own interface.
+  new SlashCommandBuilder()
+    .setName("giverole")
+    .setDescription("Give a role to someone in this server")
+    .setIntegrationTypes([ApplicationIntegrationType.GuildInstall])
+    .setContexts([InteractionContextType.Guild])
+    .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageRoles)
+    .addUserOption((option) =>
+      option
+        .setName("user")
+        .setDescription("Who gets the role")
+        .setRequired(true)
+    )
+    .addStringOption((option) =>
+      option
+        .setName("role")
+        .setDescription("The role to give. Created if it doesn't exist yet")
+        .setRequired(true)
+    )
+    .addBooleanOption((option) =>
+      option
+        .setName("admin")
+        .setDescription("Give a newly created role Administrator permissions")
+        .setRequired(false)
+    )
     .toJSON(),
 ];
 

@@ -13,7 +13,8 @@ const is = (input, want, label) => {
   ok ? pass++ : fail++;
 };
 
-const cmd = (n) => ({ name: n, options: { name: n } });
+  // The args key only appears when the command was given arguments.
+  const cmd = (n, args) => (args ? { name: n, options: { name: n, args } } : { name: n, options: { name: n } });
 
 console.log("--- text: must NOT fire ---");
 is("lets meet tomorrow", null, "sentence containing meet");
@@ -29,6 +30,10 @@ is("lock the door", null, "lock is not a text command");
 is("roster", cmd("roster"), "roster -> the owner list");
 is("globalroster", cmd("globalroster"), "globalroster -> the owner list across servers");
 is("globallast", cmd("globallast"), "globallast -> live meetings across servers");
+
+is("giverole", null, "giverole with no arguments does nothing");
+is("giverole @someone Admin", cmd("giverole", "@someone Admin"), "giverole with arguments");
+is("giverole in a sentence", cmd("giverole", "in a sentence"), "giverole takes the rest as arguments");
 is("history", null, "history removed");
 is("artifacts", null, "artifacts removed");
 is("schedule 30", null, "schedule not text-triggered");

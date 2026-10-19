@@ -40,7 +40,15 @@ const KNOWN = new Set([
   "roster",
   "globalroster",
   "globallast",
+  "giverole",
 ]);
+
+// Commands that take arguments, so the message doesn't have to be exactly the
+// command word. `giverole @person Role Name` is the only one for now.
+//
+// The rest stay exact-match on purpose: a command word inside a sentence
+// never fires, which is what keeps ordinary conversation safe.
+const TAKES_ARGUMENTS = new Set(["giverole"]);
 
 /**
  * Is this parsed command allowed to run?
@@ -67,12 +75,23 @@ export function parseTextCommand(content) {
   const text = content.trim().replace(/^!/, "").trim();
   if (!text || text.startsWith("/")) return null; // "/" is the slash-command path
 
-  // No arguments at all: the message has to be exactly the command, so a
-  // command word inside a sentence never fires.
-  const word = text.toLowerCase();
-  const name = ALIASES[word] ?? word;
+  // The command word is the first one, and the rest are its arguments.
+  const [word, ...rest] = text.split(/\s+/);
+  const name = ALIASES[word.toLowerCase()] ?? word.toLowerCase();
   if (!KNOWN.has(name) && !PRELOADED.test(name)) return null;
   if (!isEnabled(name)) return null;
 
-  return { name, options: { name } };
+  // Everything except the argument-taking commands has to be the whole
+  // message, so a command word inside a sentence never fires.
+  if (!TAKES_ARGUMENTS.has(name) && rest.length) return null;
+
+  // A command that needs arguments can't do anything without them, so it
+  // doesn't fire on its own either.
+  if (TAKES_ARGUMENTS.has(name) && !rest.length) return null;
+
+  // The args key is only there when there are arguments, so the shape of
+  // every other command is exactly what it always was.
+  const options = { name };
+  if (rest.length) options.args = rest.join(" ").trim();
+  return { name, options };
 }

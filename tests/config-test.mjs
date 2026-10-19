@@ -140,7 +140,8 @@ try {
 
 say("\n--- the slash command list follows the config ---");
 const { enabledCommands, allCommands } = await import("../src/deploy-commands.js");
-check("there are eight commands in total", allCommands().length, 8);
+check("there are nine commands in total", allCommands().length, 9);
+check("giverole is one of them", allCommands().includes("giverole"), true);
 try {
   const off = JSON.parse(original);
   off.commands.rand = false;
@@ -151,12 +152,29 @@ try {
   check("rand is not registered", enabled.includes("rand"), false);
   check("end is not registered", enabled.includes("end"), false);
   check("meet still is", enabled.includes("meet"), true);
-  check("the total dropped by two", enabled.length, 6);
+  check("the total dropped by two", enabled.length, 7);
 } finally {
   writeFileSync(configPath, original);
   loadConfig({ reload: true });
 }
-check("and they're all back", enabledCommands().length, 8);
+check("and they're all back", enabledCommands().length, 9);
+
+say("\n--- giverole can be switched off ---");
+try {
+  const off = JSON.parse(original);
+  off.commands.giverole = false;
+  writeFileSync(configPath, JSON.stringify(off, null, 2));
+  loadConfig({ reload: true });
+  check("the command is off", commandEnabled("giverole"), false);
+  check("and it isn't registered", enabledCommands().map((c) => c.name).includes("giverole"), false);
+  check("typed giverole doesn't parse", parseTextCommand("giverole @someone Admin"), null);
+  check("other commands are unaffected", commandEnabled("meet"), true);
+} finally {
+  writeFileSync(configPath, original);
+  loadConfig({ reload: true });
+}
+check("and it's back on", commandEnabled("giverole"), true);
+check("typed giverole parses again", parseTextCommand("giverole @someone Admin")?.name, "giverole");
 
 say(`\n${fail === 0 ? "ALL PASSED" : fail + " FAILED"}`);
 process.exitCode = fail ? 1 : 0;

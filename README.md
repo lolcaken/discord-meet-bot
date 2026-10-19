@@ -87,6 +87,7 @@ instead.
 | `roster` | `/roster` | Who has used the bot here (owner only) |
 | `globalroster` | `/globalroster` | Who has used the bot, everywhere (owner only) |
 | `globallast` | `/globallast` | Live meetings across every server (owner only) |
+| `giverole` | `/giverole` | Give a role to someone in this server |
 | — | `/meet` | A brand new link, plus an `@everyone` ping |
 | — | `/schedule minutes:30 title:"Standup"` | Posts a fresh link later, up to 7 days out |
 | — | `/end` | Ends the live call, dropping everyone still in it |
@@ -133,6 +134,33 @@ plain text reaches the same handler.
 The roster is built from the bot's own record of who asked for each meeting, not
 Discord's member list, which the bot can't read without a privileged intent. Servers
 are listed busiest first, so the order doesn't shuffle between runs.
+
+### `giverole` — hand out a role
+
+`/giverole user:@someone role:Admin` gives someone a role. If the role doesn't exist
+yet it's created first. The `admin` option gives a newly created role Administrator
+permissions. Typed, it works too: `giverole @someone Admin`.
+
+Discord only shows the command to people who already have **Manage Roles**, so it
+grants nobody new power — someone with Manage Roles can hand out roles through the
+server's own interface anyway. The bot's owner can always run it.
+
+**The bot needs two things in the server**, and both are outside the bot's control:
+
+1. **The Manage Roles permission.** Server Settings → Roles → click the bot's role
+   (`hadi`) → turn on **Manage Roles**.
+2. **Its role above the roles it hands out.** The bot's role is at the bottom of the
+   list by default, and Discord refuses to let it touch anything higher up. Drag the
+   bot's role up in the role list — above the role you want to give out, and above the
+   people who'll receive it.
+
+Without those, the command says exactly which one is missing rather than failing with
+a Discord error. The bot also can't give a role to someone who outranks it, and won't
+hand out a role that sits at or above its own; both are Discord's rules and both are
+explained in plain words.
+
+A role that comes from an integration (a "managed" role) can't be assigned, and
+`@everyone` isn't a role anyone can hold.
 
 ### `servers` — where is the bot?
 
@@ -378,6 +406,7 @@ Edit it, restart, done. Run `npm run config` to see what the bot is actually run
 | `commands.end` | Removes `/end` |
 | `commands.servers` | Removes `/servers` |
 | `commands.roster` / `globalroster` / `globallast` | The owner's commands, off |
+| `commands.giverole` | Removes `/giverole`, so the bot can't hand out roles |
 | `features.standingRooms` | The per-server fixed rooms; typed `meet` falls back to a random link |
 | `features.participantCounter` | The live `👤` headcount under a meeting link |
 | `features.webhookLogging` | Nothing is posted to the log webhook (the file log carries on) |

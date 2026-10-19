@@ -20,6 +20,7 @@ import { addSchedule, loadAllSchedules, removeSchedule } from "./scheduleStore.j
 import { rememberSpace, latestSpace, allSpaces } from "./spaceRegistry.js";
 import { liveMeetingsEverywhere, rosterEverywhere, renderRoster, renderLiveMeetings } from "./globalMeetings.js";
 import { isOwner, OWNER_ONLY_MESSAGE } from "./owner.js";
+import { handleGiveRole } from "./roles.js";
 import { commandEnabled, featureEnabled, limit } from "./config.js";
 import { withRetry, isTransient } from "./retry.js";
 import { countServicedGuilds, resolveGuildRoom, seedGuildRooms } from "./guildRooms.js";
@@ -821,6 +822,40 @@ function checkAllowed(interaction) {
  * touched, which is what lets a Message be adapted into an interaction.
  */
 /**
+ * Typed `giverole @person Role Name`.
+ *
+ * The person comes from a mention, and the role name is whatever is left of
+ * the message. A role can also be mentioned by name, in which case that wins
+ * over the text - mentioning a role is more specific than typing its name.
+ */
+async function handleTypedGiveRole(interaction) {
+  const mentioned = interaction.mentions?.users?.first?.() ?? null;
+  const mentionedRole = interaction.mentions?.roles?.first?.() ?? null;
+
+  // The role name: a mentioned role, or the text after the mention.
+  const args = interaction.options?.args ?? "";
+  const roleName = mentionedRole?.name ?? args.replace(/<@!?\d+>/g, "").trim();
+
+  if (!mentioned) {
+    await safeReply(interaction, "Mention the person who gets the role, like `giverole @person Admin`.");
+    return;
+  }
+  if (!roleName) {
+    await safeReply(interaction, "Say which role to give, like `giverole @person Admin`.");
+    return;
+  }
+
+  // "admin" as a word asks for the new role to have Administrator.
+  const admin = /\badmin(istrator)?\b/i.test(roleName) && !mentionedRole;
+
+  await handleGiveRole(interaction, {
+    userId: mentioned.id,
+    roleName,
+    admin,
+  });
+}
+
+/**
  * `/servers`: every server the bot is in, rebuilt fresh.
  *
  * Main guild only. The answer includes every server the bot sits in, which may
@@ -917,6 +952,14 @@ async function handleCommand(interaction) {
       // `servers` lists every server the bot is in; main guild only.
       if (name === "servers") {
         await handleServers(interaction);
+        return;
+      }
+
+      // Typed `giverole @person Role Name`. The mention and the role name
+      // both come from the message itself, so this is the one command whose
+      // arguments don't fit the slash-command option shape.
+      if (name === "giverole") {
+        await handleTypedGiveRole(interaction);
         return;
       }
 
@@ -1084,6 +1127,26 @@ async function handleCommand(interaction) {
       interaction.commandName === "globallast"
     ) {
       await handleOwnerOnly(interaction, interaction.commandName);
+      return;
+    }
+
+    if (interaction.commandName === "giverole") {
+      const user = interaction.options.getUser("user");
+      const roleName = interaction.options.getString("role");
+      const admin = interaction.options.getBoolean("admin") ?? false;
+
+      if (!user || !roleName) {
+        await safeReply(interaction, {
+          content: "I need both a person and a role name.",
+          ephemeral: true,
+        });
+        return;
+      }
+
+      // Creating a role and checking the hierarchy can take longer than
+      // Discord's 3-second deadline, so take the pressure off first.
+      await interaction.deferReply();
+      await handleGiveRole(interaction, { userId: user.id, roleName, admin });
       return;
     }
 
@@ -1276,6 +1339,11 @@ function textCommandFrom(message, parsed) {
   return {
     commandName: parsed.name,
     user: message.author,
+    // The member who ran it, for the permission checks. A Message's member
+    // is the same shape as a GuildMember, so it carries permissions and roles.
+    member: message.member ?? null,
+    // The client, for the commands that make API calls of their own.
+    client,
     channelId: message.channelId,
     guildId: message.guild?.id ?? null,
     guild: message.guild,
@@ -1303,7 +1371,14 @@ function textCommandFrom(message, parsed) {
       // Nothing sensible to hand back for a role from typed text; the only
       // command using it is /schedule, which treats null as "don't ping".
       getRole: () => null,
+      // Typed `giverole @person Role Name` needs the mention and the rest of
+      // the message, neither of which fits the slash-command option shape.
+      getUser: () => options.user ?? null,
+      getBoolean: (key) => (options[key] === undefined ? null : Boolean(options[key])),
     },
+    // The raw message, for the typed giverole handler.
+    mentions: message.mentions,
+    content: message.content ?? "",
   };
 }
 

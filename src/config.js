@@ -35,6 +35,7 @@ const DEFAULTS = {
     roster: true,
     globalroster: true,
     globallast: true,
+    giverole: true,
   },
   features: {
     standingRooms: true,
